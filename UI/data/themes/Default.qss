@@ -51,6 +51,24 @@ MuteCheckBox::indicator:unchecked {
     image: url(:/res/images/unmute.png);
 }
 
+ExpandCheckBox {
+    outline: none;
+}
+
+ExpandCheckBox::indicator {
+    width: 16px;
+    height: 16px;
+}
+
+ExpandCheckBox::indicator:checked {
+    image: url(:/res/images/add.png);
+}
+
+ExpandCheckBox::indicator:unchecked {
+    image: url(:/res/images/list_remove.png);
+    icon-size: 
+}
+
 OBSHotkeyLabel[hotkeyPairHover=true] {
     color: red;
 }
