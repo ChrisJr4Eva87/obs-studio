@@ -232,9 +232,6 @@ private:
 
 	void UpdatePreviewScalingMenu();
 
-	void UpdateSources(OBSScene scene);
-	void InsertSceneItem(obs_sceneitem_t *item);
-
 	void LoadSceneListOrder(obs_data_array_t *array);
 	obs_data_array_t *SaveSceneListOrder();
 	void ChangeSceneIndex(bool relative, int idx, int invalidIdx);
@@ -275,7 +272,7 @@ private:
 
 	void SaveProjectNow();
 
-	QListWidgetItem *GetTopSelectedSourceItem();
+	int GetTopSelectedSourceItem();
 
 	obs_hotkey_pair_id streamingHotkeys, recordingHotkeys,
 	                   replayBufHotkeys;
@@ -550,11 +547,9 @@ public:
 		}
 	}
 
-	void ReorderSceneItem(obs_sceneitem_t *item, size_t idx);
-
 	QMenu *AddDeinterlacingMenu(obs_source_t *source);
 	QMenu *AddScaleFilteringMenu(obs_sceneitem_t *item);
-	void CreateSourcePopupMenu(QListWidgetItem *item, bool preview);
+	void CreateSourcePopupMenu(int idx, bool preview);
 
 	void UpdateTitleBar();
 	void UpdateSceneSelection(OBSSource source);
@@ -605,7 +600,6 @@ private slots:
 	void on_actionRemoveScene_triggered();
 	void on_actionSceneUp_triggered();
 	void on_actionSceneDown_triggered();
-	void on_sources_itemSelectionChanged();
 	void on_sources_customContextMenuRequested(const QPoint &pos);
 	void on_sources_itemDoubleClicked(QListWidgetItem *item);
 	void on_scenes_itemDoubleClicked(QListWidgetItem *item);
@@ -688,8 +682,6 @@ private slots:
 	void EditSceneItemName();
 
 	void SceneNameEdited(QWidget *editor,
-			QAbstractItemDelegate::EndEditHint endHint);
-	void SceneItemNameEdited(QWidget *editor,
 			QAbstractItemDelegate::EndEditHint endHint);
 
 	void OpenSceneFilters();

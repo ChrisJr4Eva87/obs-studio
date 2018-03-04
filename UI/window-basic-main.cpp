@@ -149,8 +149,6 @@ OBSBasic::OBSBasic(QWidget *parent)
 
 	copyActionsDynamicProperties();
 
-	ui->sources->setItemDelegate(new VisibilityItemDelegate(ui->sources));
-
 	char styleSheetPath[512];
 	int ret = GetProfilePath(styleSheetPath, sizeof(styleSheetPath),
 			"stylesheet.qss");
@@ -200,13 +198,6 @@ OBSBasic::OBSBasic(QWidget *parent)
 					QAbstractItemDelegate::EndEditHint)),
 			this,
 			SLOT(SceneNameEdited(QWidget*,
-					QAbstractItemDelegate::EndEditHint)));
-
-	connect(ui->sources->itemDelegate(),
-			SIGNAL(closeEditor(QWidget*,
-					QAbstractItemDelegate::EndEditHint)),
-			this,
-			SLOT(SceneItemNameEdited(QWidget*,
 					QAbstractItemDelegate::EndEditHint)));
 
 	cpuUsageInfo = os_cpu_usage_info_start();
@@ -1359,16 +1350,6 @@ void OBSBasic::OBSInit()
 	int ret;
 
 	SourceTree *tree = new SourceTree();
-	tree->AddItem("Hi");
-	tree->AddItem("Testing, 123");
-
-	QVBoxLayout *test123 = new QVBoxLayout();
-	test123->addWidget(tree);
-
-	QWidget *test = new QWidget(nullptr);
-	test->setAttribute(Qt::WA_DeleteOnClose, true);
-	test->setLayout(test123);
-	test->show();
 
 	if (!sceneCollection)
 		throw "Failed to get scene collection name";
@@ -2037,7 +2018,7 @@ OBSSceneItem OBSBasic::GetSceneItem(QListWidgetItem *item)
 
 OBSSceneItem OBSBasic::GetCurrentSceneItem()
 {
-	return GetSceneItem(GetTopSelectedSourceItem());
+	return ui->sources->Get(GetTopSelectedSourceItem());
 }
 
 void OBSBasic::UpdatePreviewScalingMenu()
@@ -2058,32 +2039,6 @@ void OBSBasic::UpdatePreviewScalingMenu()
 	ui->actionScaleCanvas->setChecked(scalingAmount == 1.0f);
 	ui->actionScaleOutput->setChecked(
 			scalingAmount == float(ovi.output_width) / float(ovi.base_width));
-}
-
-void OBSBasic::UpdateSources(OBSScene scene)
-{
-	ClearListItems(ui->sources);
-
-	obs_scene_enum_items(scene,
-			[] (obs_scene_t *scene, obs_sceneitem_t *item, void *p)
-			{
-				OBSBasic *window = static_cast<OBSBasic*>(p);
-				window->InsertSceneItem(item);
-
-				UNUSED_PARAMETER(scene);
-				return true;
-			}, this);
-}
-
-void OBSBasic::InsertSceneItem(obs_sceneitem_t *item)
-{
-	QListWidgetItem *listItem = new QListWidgetItem();
-	SetOBSRef(listItem, OBSSceneItem(item));
-
-	ui->sources->insertItem(0, listItem);
-	ui->sources->setCurrentRow(0, QItemSelectionModel::ClearAndSelect);
-
-	SetupVisibilityItem(ui->sources, listItem, item);
 }
 
 void OBSBasic::CreateInteractionWindow(obs_source_t *source)
@@ -2212,7 +2167,7 @@ void OBSBasic::RemoveScene(OBSSource source)
 
 	if (sel != nullptr) {
 		if (sel == ui->scenes->currentItem())
-			ClearListItems(ui->sources);
+			ui->sources->Clear();
 		delete sel;
 	}
 
@@ -2231,14 +2186,12 @@ void OBSBasic::RemoveScene(OBSSource source)
 
 void OBSBasic::AddSceneItem(OBSSceneItem item)
 {
-	obs_scene_t  *scene  = obs_sceneitem_get_scene(item);
-
-	if (GetCurrentScene() == scene)
-		InsertSceneItem(item);
+	ui->sources->Add(item);
 
 	SaveProject();
 
 	if (!disableSaving) {
+		obs_scene_t *scene = obs_sceneitem_get_scene(item);
 		obs_source_t *sceneSource = obs_scene_get_source(scene);
 		obs_source_t *itemSource = obs_sceneitem_get_source(item);
 		blog(LOG_INFO, "User added source '%s' (%s) to scene '%s'",
@@ -2250,14 +2203,7 @@ void OBSBasic::AddSceneItem(OBSSceneItem item)
 
 void OBSBasic::RemoveSceneItem(OBSSceneItem item)
 {
-	for (int i = 0; i < ui->sources->count(); i++) {
-		QListWidgetItem *listItem = ui->sources->item(i);
-
-		if (GetOBSRef<OBSSceneItem>(listItem) == item) {
-			DeleteListItem(ui->sources, listItem);
-			break;
-		}
-	}
+	ui->sources->Remove(item);
 
 	SaveProject();
 
@@ -2288,8 +2234,6 @@ void OBSBasic::UpdateSceneSelection(OBSSource source)
 			sceneChanging = true;
 			ui->scenes->setCurrentItem(items.first());
 			sceneChanging = false;
-
-			UpdateSources(scene);
 
 			OBSScene curScene =
 				GetOBSRef<OBSScene>(ui->scenes->currentItem());
@@ -2335,19 +2279,7 @@ void OBSBasic::SelectSceneItem(OBSScene scene, OBSSceneItem item, bool select)
 	if (scene != GetCurrentScene() || ignoreSelectionUpdate)
 		return;
 
-	for (int i = 0; i < ui->sources->count(); i++) {
-		QListWidgetItem *witem = ui->sources->item(i);
-		QVariant data =
-			witem->data(static_cast<int>(QtDataRole::OBSRef));
-		if (!data.canConvert<OBSSceneItem>())
-			continue;
-
-		if (item != data.value<OBSSceneItem>())
-			continue;
-
-		witem->setSelected(select);
-		break;
-	}
+	ui->sources->SelectItem(item, select);
 }
 
 static inline bool SourceMixerHidden(obs_source_t *source)
@@ -2843,62 +2775,12 @@ void OBSBasic::RemoveSelectedSceneItem()
 	}
 }
 
-struct ReorderInfo {
-	int idx = 0;
-	OBSBasic *window;
-
-	inline ReorderInfo(OBSBasic *window_) : window(window_) {}
-};
-
-void OBSBasic::ReorderSceneItem(obs_sceneitem_t *item, size_t idx)
-{
-	int count = ui->sources->count();
-	int idx_inv = count - (int)idx - 1;
-
-	for (int i = 0; i < count; i++) {
-		QListWidgetItem *listItem = ui->sources->item(i);
-		OBSSceneItem sceneItem = GetOBSRef<OBSSceneItem>(listItem);
-
-		if (sceneItem == item) {
-			if ((int)idx_inv != i) {
-				bool sel = (ui->sources->currentRow() == i);
-
-				listItem = TakeListItem(ui->sources, i);
-				if (listItem)  {
-					ui->sources->insertItem(idx_inv,
-							listItem);
-					SetupVisibilityItem(ui->sources,
-							listItem, item);
-
-					if (sel)
-						ui->sources->setCurrentRow(
-								idx_inv);
-				}
-			}
-
-			break;
-		}
-	}
-}
-
 void OBSBasic::ReorderSources(OBSScene scene)
 {
-	ReorderInfo info(this);
-
 	if (scene != GetCurrentScene() || ui->sources->IgnoreReorder())
 		return;
 
-	obs_scene_enum_items(scene,
-			[] (obs_scene_t*, obs_sceneitem_t *item, void *p)
-			{
-				ReorderInfo *info =
-					reinterpret_cast<ReorderInfo*>(p);
-
-				info->window->ReorderSceneItem(item,
-					info->idx++);
-				return true;
-			}, &info);
-
+	ui->sources->ReorderItems();
 	SaveProject();
 }
 
@@ -3423,7 +3305,7 @@ void OBSBasic::ClearSceneData()
 
 	ClearVolumeControls();
 	ClearListItems(ui->scenes);
-	ClearListItems(ui->sources);
+	ui->sources->Clear();
 	ClearQuickTransitions();
 	ui->transitions->clear();
 
@@ -3813,44 +3695,10 @@ void OBSBasic::MoveSceneToBottom()
 			ui->scenes->count() - 1);
 }
 
-void OBSBasic::on_sources_itemSelectionChanged()
-{
-	SignalBlocker sourcesSignalBlocker(ui->sources);
-
-	auto updateItemSelection = [&]()
-	{
-		ignoreSelectionUpdate = true;
-		for (int i = 0; i < ui->sources->count(); i++)
-		{
-			QListWidgetItem *wItem = ui->sources->item(i);
-			OBSSceneItem item = GetOBSRef<OBSSceneItem>(wItem);
-
-			obs_sceneitem_select(item, wItem->isSelected());
-		}
-		ignoreSelectionUpdate = false;
-	};
-	using updateItemSelection_t = decltype(updateItemSelection);
-
-	obs_scene_atomic_update(GetCurrentScene(),
-			[](void *data, obs_scene_t *)
-	{
-		(*static_cast<updateItemSelection_t*>(data))();
-	}, static_cast<void*>(&updateItemSelection));
-}
-
 void OBSBasic::EditSceneItemName()
 {
-	QListWidgetItem *item = GetTopSelectedSourceItem();
-	Qt::ItemFlags flags   = item->flags();
-	OBSSceneItem sceneItem= GetOBSRef<OBSSceneItem>(item);
-	obs_source_t *source  = obs_sceneitem_get_source(sceneItem);
-	const char *name      = obs_source_get_name(source);
-
-	item->setText(QT_UTF8(name));
-	item->setFlags(flags | Qt::ItemIsEditable);
-	ui->sources->removeItemWidget(item);
-	ui->sources->editItem(item);
-	item->setFlags(flags);
+	int idx = GetTopSelectedSourceItem();
+	ui->sources->Edit(idx);
 }
 
 void OBSBasic::SetDeinterlacingMode()
@@ -3950,7 +3798,7 @@ QMenu *OBSBasic::AddScaleFilteringMenu(obs_sceneitem_t *item)
 	return menu;
 }
 
-void OBSBasic::CreateSourcePopupMenu(QListWidgetItem *item, bool preview)
+void OBSBasic::CreateSourcePopupMenu(int idx, bool preview)
 {
 	QMenu popup(this);
 	QPointer<QMenu> previewProjector;
@@ -4002,11 +3850,11 @@ void OBSBasic::CreateSourcePopupMenu(QListWidgetItem *item, bool preview)
 	popup.addAction(ui->actionPasteFilters);
 	popup.addSeparator();
 
-	if (item) {
+	if (idx != -1) {
 		if (addSourceMenu)
 			popup.addSeparator();
 
-		OBSSceneItem sceneItem = GetSceneItem(item);
+		OBSSceneItem sceneItem = ui->sources->Get(idx);
 		obs_source_t *source = obs_sceneitem_get_source(sceneItem);
 		uint32_t flags = obs_source_get_output_flags(source);
 		bool isAsyncVideo = (flags & OBS_SOURCE_ASYNC_VIDEO) ==
@@ -4077,8 +3925,10 @@ void OBSBasic::CreateSourcePopupMenu(QListWidgetItem *item, bool preview)
 
 void OBSBasic::on_sources_customContextMenuRequested(const QPoint &pos)
 {
-	if (ui->scenes->count())
-		CreateSourcePopupMenu(ui->sources->itemAt(pos), false);
+	if (ui->scenes->count()) {
+		QModelIndex idx = ui->sources->indexAt(pos);
+		CreateSourcePopupMenu(idx.row(), false);
+	}
 }
 
 void OBSBasic::on_sources_itemDoubleClicked(QListWidgetItem *witem)
@@ -4493,26 +4343,6 @@ void OBSBasic::SceneNameEdited(QWidget *editor,
 
 	if (api)
 		api->on_event(OBS_FRONTEND_EVENT_SCENE_LIST_CHANGED);
-
-	UNUSED_PARAMETER(endHint);
-}
-
-void OBSBasic::SceneItemNameEdited(QWidget *editor,
-		QAbstractItemDelegate::EndEditHint endHint)
-{
-	OBSSceneItem item  = GetCurrentSceneItem();
-	QLineEdit    *edit = qobject_cast<QLineEdit*>(editor);
-	string       text  = QT_TO_UTF8(edit->text().trimmed());
-
-	if (!item)
-		return;
-
-	obs_source_t *source = obs_sceneitem_get_source(item);
-	RenameListItem(this, ui->sources, source, text);
-
-	QListWidgetItem *listItem = ui->sources->currentItem();
-	listItem->setText(QString());
-	SetupVisibilityItem(ui->sources, listItem, item);
 
 	UNUSED_PARAMETER(endHint);
 }
@@ -5163,13 +4993,11 @@ void OBSBasic::on_actionShowProfileFolder_triggered()
 	QDesktopServices::openUrl(QUrl::fromLocalFile(path));
 }
 
-QListWidgetItem *OBSBasic::GetTopSelectedSourceItem()
+int OBSBasic::GetTopSelectedSourceItem()
 {
-	QList<QListWidgetItem*> selectedItems = ui->sources->selectedItems();
-	QListWidgetItem *topItem = nullptr;
-	if (selectedItems.size() != 0)
-		topItem = selectedItems[0];
-	return topItem;
+	QModelIndexList selectedItems =
+		ui->sources->selectionModel()->selectedIndexes();
+	return selectedItems.count() ? selectedItems[0].row() : -1;
 }
 
 void OBSBasic::on_preview_customContextMenuRequested(const QPoint &pos)

@@ -518,7 +518,7 @@
          <number>0</number>
         </property>
         <item>
-         <widget class="SourceListWidget" name="sources">
+         <widget class="SourceTree" name="sources">
           <property name="sizePolicy">
            <sizepolicy hsizetype="Preferred" vsizetype="Expanding">
             <horstretch>0</horstretch>
@@ -545,6 +545,9 @@
           </property>
           <property name="selectionMode">
            <enum>QAbstractItemView::ExtendedSelection</enum>
+          </property>
+          <property name="movement">
+           <enum>QListView::Free</enum>
           </property>
           <addaction name="actionRemoveSource"/>
          </widget>
@@ -1682,9 +1685,9 @@
    <container>1</container>
   </customwidget>
   <customwidget>
-   <class>SourceListWidget</class>
-   <extends>QListWidget</extends>
-   <header>source-list-widget.hpp</header>
+   <class>SourceTree</class>
+   <extends>QListView</extends>
+   <header>source-tree.hpp</header>
   </customwidget>
  </customwidgets>
  <resources>

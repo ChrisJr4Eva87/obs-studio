@@ -7,12 +7,11 @@
 #include <QAbstractListModel>
 
 class QLabel;
-class SourceTree;
-class QMouseEvent;
 class QCheckBox;
+class QLineEdit;
+class SourceTree;
 class QSpacerItem;
 class QHBoxLayout;
-class QRubberBand;
 class LockedCheckBox;
 class VisibilityCheckBox;
 class VisibilityItemWidget;
@@ -20,15 +19,19 @@ class VisibilityItemWidget;
 class SourceTreeItem : public QWidget {
 	Q_OBJECT
 
+	friend class SourceTree;
+	friend class SourceTreeModel;
+
 	void mousePressEvent(QMouseEvent *event) override;
 	void mouseMoveEvent(QMouseEvent *event) override;
 	void mouseReleaseEvent(QMouseEvent *event) override;
 
 	void paintEvent(QPaintEvent *event) override;
 
+	virtual bool eventFilter(QObject *object, QEvent *event) override;
+
 public:
-	explicit SourceTreeItem(SourceTree *tree, const QString &text,
-			SourceTreeItem *group = nullptr);
+	explicit SourceTreeItem(SourceTree *tree, OBSSceneItem sceneitem);
 
 	void RecalculateSpacing();
 
@@ -40,10 +43,14 @@ private:
 	QHBoxLayout *boxLayout = nullptr;
 	QLabel *label = nullptr;
 
-	//bool selected = false;
+	QLineEdit *editor = nullptr;
 
 	SourceTree *tree;
-	SourceTreeItem *group;
+	OBSSceneItem sceneitem;
+
+private slots:
+	void EnterEditMode();
+	void ExitEditMode(bool save);
 };
 
 class SourceTreeModel : public QAbstractListModel {
@@ -55,7 +62,13 @@ class SourceTreeModel : public QAbstractListModel {
 	QVector<QPointer<SourceTreeItem>> items;
 
 	static void OBSFrontendEvent(enum obs_frontend_event event, void *ptr);
+	void Clear();
 	void SceneChanged();
+	void ReorderItems();
+
+	void Add(obs_sceneitem_t *item);
+	void Remove(obs_sceneitem_t *item);
+	OBSSceneItem Get(int idx);
 
 public:
 	explicit SourceTreeModel(SourceTree *st);
@@ -63,6 +76,8 @@ public:
 
 	virtual int rowCount(const QModelIndex &parent) const override;
 	virtual QVariant data(const QModelIndex &index, int role) const override;
+
+	virtual Qt::ItemFlags flags(const QModelIndex &index) const override;
 };
 
 class SourceTree : public QListView {
@@ -73,6 +88,7 @@ class SourceTree : public QListView {
 	friend class SourceTreeModel;
 
 	void ResetWidgets();
+	void UpdateWidget(const QModelIndex &idx, QWidget *widget);
 
 	inline SourceTreeModel *GetStm() const
 	{
@@ -80,24 +96,23 @@ class SourceTree : public QListView {
 	}
 
 public:
-	explicit SourceTree();
-	void UpdateScene();
+	explicit SourceTree(QWidget *parent = nullptr);
 
 	inline bool IgnoreReorder() const {return ignoreReorder;}
+	inline void ReorderItems() {GetStm()->ReorderItems();}
+	inline void Clear() {GetStm()->Clear();}
 
-	inline void AddItem(const QString &) {}
+	inline void Add(obs_sceneitem_t *item) {GetStm()->Add(item);}
+	inline void Remove(obs_sceneitem_t *item) {GetStm()->Remove(item);}
+	inline OBSSceneItem Get(int idx) {return GetStm()->Get(idx);}
+
+	void SelectItem(obs_sceneitem_t *sceneitem, bool select);
+
+	void Edit(int idx);
 
 protected:
 	virtual void mouseDoubleClickEvent(QMouseEvent *event) override;
 	virtual void dropEvent(QDropEvent *event) override;
 
-	virtual void commitData(QWidget *editor) override;
-	virtual void currentChanged(const QModelIndex &cur,
-			const QModelIndex &prev) override;
-	virtual void dataChanged(const QModelIndex &tl, const QModelIndex &br,
-			const QVector<int> &roles) override;
-	virtual void rowsAboutToBeRemoved(const QModelIndex &parent, int start,
-			int end) override;
-	virtual void rowsInserted(const QModelIndex &parent,
-			int start, int end) override;
+	virtual void selectionChanged(const QItemSelection &selected, const QItemSelection &deselected) override;
 };
