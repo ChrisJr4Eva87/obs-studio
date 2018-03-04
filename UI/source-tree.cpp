@@ -227,7 +227,7 @@ void SourceTreeModel::OBSFrontendEvent(enum obs_frontend_event event, void *ptr)
 	SourceTreeModel *stm = reinterpret_cast<SourceTreeModel *>(ptr);
 
 	switch ((int)event) {
-	case OBS_FRONTEND_EVENT_SCENE_CHANGED: /* TODO studio mode */
+	case OBS_FRONTEND_EVENT_PREVIEW_SCENE_CHANGED:
 		stm->SceneChanged();
 		break;
 	case OBS_FRONTEND_EVENT_EXIT:

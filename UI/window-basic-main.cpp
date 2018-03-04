@@ -2184,7 +2184,10 @@ void OBSBasic::RemoveScene(OBSSource source)
 
 void OBSBasic::AddSceneItem(OBSSceneItem item)
 {
-	ui->sources->Add(item);
+	obs_scene_t *scene = obs_sceneitem_get_scene(item);
+
+	if (GetCurrentScene() == scene)
+		ui->sources->Add(item);
 
 	SaveProject();
 
