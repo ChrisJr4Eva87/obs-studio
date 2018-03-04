@@ -323,8 +323,12 @@ void SourceTreeModel::ReorderItems()
 		/* move items */
 		beginMoveRows(QModelIndex(), idx1Old, idx1Old + count - 1,
 		              QModelIndex(), idx1New + count);
-		for (i = 0; i < count; i++)
-			items.move(idx1Old, idx1New + count);
+		for (i = 0; i < count; i++) {
+			int to = idx1New + count;
+			if (to > idx1Old)
+				to--;
+			items.move(idx1Old, to);
+		}
 		endMoveRows();
 	}
 }
@@ -359,7 +363,7 @@ OBSSceneItem SourceTreeModel::Get(int idx)
 }
 
 SourceTreeModel::SourceTreeModel(SourceTree *st_)
-	: QAbstractListModel (nullptr),
+	: QAbstractListModel (st_),
 	  st                 (st_)
 {
 	obs_frontend_add_event_callback(OBSFrontendEvent, this);
@@ -382,14 +386,18 @@ QVariant SourceTreeModel::data(const QModelIndex &index, int role) const
 
 Qt::ItemFlags SourceTreeModel::flags(const QModelIndex &index) const
 {
-	if (index.row() < 0 || index.row() >= items.count())
-		return 0;
+	if (!index.isValid())
+		return QAbstractListModel::flags(index) | Qt::ItemIsDropEnabled;
 
-	return Qt::ItemIsSelectable |
-	       Qt::ItemIsEnabled |
+	return QAbstractListModel::flags(index) |
 	       Qt::ItemIsEditable |
-	       Qt::ItemIsDragEnabled |
-	       Qt::ItemIsDropEnabled;
+	       Qt::ItemIsDragEnabled /*| TODO: if group, allow "drop in"
+	       Qt::ItemIsDropEnabled*/;
+}
+
+Qt::DropActions SourceTreeModel::supportedDropActions() const
+{
+	return QAbstractItemModel::supportedDropActions() | Qt::MoveAction;
 }
 
 /* ========================================================================= */
@@ -444,11 +452,47 @@ void SourceTree::mouseDoubleClickEvent(QMouseEvent *event)
 
 void SourceTree::dropEvent(QDropEvent *event)
 {
-	QListView::dropEvent(event);
-	if (!event->isAccepted())
+	if (event->source() != this) {
+		QListView::dropEvent(event);
 		return;
+	}
 
-	/* TODO */
+	SourceTreeModel *stm = GetStm();
+	QModelIndexList indices = selectedIndexes();
+	QList<QPersistentModelIndex> persistentIndices;
+
+	persistentIndices.reserve(indices.count());
+	for (QModelIndex &index : indices)
+		persistentIndices.append(index);
+	std::sort(persistentIndices.begin(), persistentIndices.end());
+
+	DropIndicatorPosition indicator = dropIndicatorPosition();
+	int row = indexAt(event->pos()).row();
+
+	if (indicator == QAbstractItemView::BelowItem)
+		row++;
+
+	if (row >= 0 && row <= stm->items.count()) {
+		int r = row;
+		for (auto persistentIdx : persistentIndices) {
+			int from = persistentIdx.row();
+			int to = r;
+
+			stm->beginMoveRows(QModelIndex(), from, from,
+			                  QModelIndex(), to);
+			if (to > from)
+				to--;
+			stm->items.move(from, to);
+			stm->endMoveRows();
+
+			r = persistentIdx.row() + 1;
+		}
+
+		event->accept();
+		event->setDropAction(Qt::CopyAction);
+	}
+
+	QListView::dropEvent(event);
 }
 
 void SourceTree::selectionChanged(

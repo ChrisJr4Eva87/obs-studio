@@ -78,6 +78,7 @@ public:
 	virtual QVariant data(const QModelIndex &index, int role) const override;
 
 	virtual Qt::ItemFlags flags(const QModelIndex &index) const override;
+	virtual Qt::DropActions supportedDropActions() const override;
 };
 
 class SourceTree : public QListView {

@@ -546,9 +546,6 @@
           <property name="selectionMode">
            <enum>QAbstractItemView::ExtendedSelection</enum>
           </property>
-          <property name="movement">
-           <enum>QListView::Free</enum>
-          </property>
           <addaction name="actionRemoveSource"/>
          </widget>
         </item>
