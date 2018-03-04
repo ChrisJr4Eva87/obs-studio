@@ -1349,8 +1349,6 @@ void OBSBasic::OBSInit()
 	char fileName[512];
 	int ret;
 
-	SourceTree *tree = new SourceTree();
-
 	if (!sceneCollection)
 		throw "Failed to get scene collection name";
 
