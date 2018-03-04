@@ -26,17 +26,12 @@ class SourceTreeItem : public QWidget {
 	void mouseMoveEvent(QMouseEvent *event) override;
 	void mouseReleaseEvent(QMouseEvent *event) override;
 
-	void paintEvent(QPaintEvent *event) override;
-
 	virtual bool eventFilter(QObject *object, QEvent *event) override;
 
 public:
 	explicit SourceTreeItem(SourceTree *tree, OBSSceneItem sceneitem);
 
-	void RecalculateSpacing();
-
 private:
-	QSpacerItem *spacer = nullptr;
 	QCheckBox *expand = nullptr;
 	VisibilityCheckBox *vis = nullptr;
 	LockedCheckBox *lock = nullptr;
@@ -47,10 +42,17 @@ private:
 
 	SourceTree *tree;
 	OBSSceneItem sceneitem;
+	OBSSignal sceneRemoveSignal;
+	OBSSignal itemRemoveSignal;
+	OBSSignal visibleSignal;
+	OBSSignal renameSignal;
 
 private slots:
 	void EnterEditMode();
 	void ExitEditMode(bool save);
+
+	void VisibilityChanged(bool visible);
+	void Renamed(const QString &name);
 };
 
 class SourceTreeModel : public QAbstractListModel {
@@ -59,7 +61,7 @@ class SourceTreeModel : public QAbstractListModel {
 	friend class SourceTree;
 
 	SourceTree *st;
-	QVector<QPointer<SourceTreeItem>> items;
+	QVector<OBSSceneItem> items;
 
 	static void OBSFrontendEvent(enum obs_frontend_event event, void *ptr);
 	void Clear();
@@ -89,7 +91,7 @@ class SourceTree : public QListView {
 	friend class SourceTreeModel;
 
 	void ResetWidgets();
-	void UpdateWidget(const QModelIndex &idx, QWidget *widget);
+	void UpdateWidget(const QModelIndex &idx, obs_sceneitem_t *item);
 
 	inline SourceTreeModel *GetStm() const
 	{
