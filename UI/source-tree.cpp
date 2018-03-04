@@ -64,7 +64,7 @@ SourceTreeItem::SourceTreeItem(SourceTree *tree_, OBSSceneItem sceneitem_)
 
 	/* --------------------------------------------------------- */
 
-	auto removeSignals = [] (void *data, calldata_t *cd)
+	auto removeItem = [] (void *data, calldata_t *cd)
 	{
 		SourceTreeItem *this_ = reinterpret_cast<SourceTreeItem*>(data);
 		obs_sceneitem_t *curItem =
@@ -75,6 +75,7 @@ SourceTreeItem::SourceTreeItem(SourceTree *tree_, OBSSceneItem sceneitem_)
 			this_->itemRemoveSignal.Disconnect();
 			this_->visibleSignal.Disconnect();
 			this_->renameSignal.Disconnect();
+			this_->sceneitem = nullptr;
 		}
 	};
 
@@ -94,8 +95,8 @@ SourceTreeItem::SourceTreeItem(SourceTree *tree_, OBSSceneItem sceneitem_)
 	obs_source_t *sceneSource = obs_scene_get_source(scene);
 	signal_handler_t *signal = obs_source_get_signal_handler(sceneSource);
 
-	sceneRemoveSignal.Connect(signal, "remove", removeSignals, this);
-	itemRemoveSignal.Connect(signal, "item_remove", removeSignals, this);
+	sceneRemoveSignal.Connect(signal, "remove", removeItem, this);
+	itemRemoveSignal.Connect(signal, "item_remove", removeItem, this);
 	visibleSignal.Connect(signal, "item_visible", itemVisible, this);
 
 	/* --------------------------------------------------------- */
