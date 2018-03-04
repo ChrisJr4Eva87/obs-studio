@@ -387,7 +387,9 @@ Qt::ItemFlags SourceTreeModel::flags(const QModelIndex &index) const
 
 	return Qt::ItemIsSelectable |
 	       Qt::ItemIsEnabled |
-	       Qt::ItemIsEditable;
+	       Qt::ItemIsEditable |
+	       Qt::ItemIsDragEnabled |
+	       Qt::ItemIsDropEnabled;
 }
 
 /* ========================================================================= */
@@ -396,8 +398,6 @@ SourceTree::SourceTree(QWidget *parent_) : QListView(parent_)
 {
 	SourceTreeModel *stm_ = new SourceTreeModel(this);
 	setModel(stm_);
-	setDragDropMode(QAbstractItemView::DragDrop);
-	setMovement(QListView::Free);
 }
 
 void SourceTree::ResetWidgets()
