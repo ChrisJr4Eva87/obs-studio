@@ -62,11 +62,13 @@ typedef struct obs_service    obs_service_t;
 typedef struct obs_module     obs_module_t;
 typedef struct obs_fader      obs_fader_t;
 typedef struct obs_volmeter   obs_volmeter_t;
+typedef struct obs_scene_item_group obs_sceneitem_group_t;
 
 typedef struct obs_weak_source  obs_weak_source_t;
 typedef struct obs_weak_output  obs_weak_output_t;
 typedef struct obs_weak_encoder obs_weak_encoder_t;
 typedef struct obs_weak_service obs_weak_service_t;
+
 
 #include "obs-source.h"
 #include "obs-encoder.h"
@@ -1325,6 +1327,15 @@ EXPORT void obs_scene_enum_items(obs_scene_t *scene,
 EXPORT bool obs_scene_reorder_items(obs_scene_t *scene,
 		obs_sceneitem_t * const *item_order, size_t item_order_size);
 
+struct obs_sceneitem_order_info {
+	obs_sceneitem_t *group;
+	obs_sceneitem_t *item;
+};
+
+EXPORT bool obs_scene_reorder_items2(obs_scene_t *scene,
+		struct obs_sceneitem_order_info *item_order,
+		size_t item_order_size);
+
 /** Adds/creates a new scene item for a source */
 EXPORT obs_sceneitem_t *obs_scene_add(obs_scene_t *scene, obs_source_t *source);
 
@@ -1420,6 +1431,25 @@ EXPORT void obs_sceneitem_defer_update_end(obs_sceneitem_t *item);
 /** Gets private front-end settings data.  This data is saved/loaded
  * automatically.  Returns an incremented reference. */
 EXPORT obs_data_t *obs_sceneitem_get_private_settings(obs_sceneitem_t *item);
+
+EXPORT obs_sceneitem_group_t *obs_scene_insert_group(obs_scene_t *scene,
+		const char *name, obs_sceneitem_t **items, size_t count);
+
+EXPORT obs_sceneitem_group_t *obs_sceneitem_group_from_item(
+		obs_sceneitem_t *item);
+
+EXPORT obs_sceneitem_t *obs_sceneitem_group_get_item(
+		const obs_sceneitem_group_t *group);
+EXPORT obs_scene_t *obs_sceneitem_group_get_scene(
+		const obs_sceneitem_group_t *group);
+EXPORT obs_source_t *obs_sceneitem_group_get_source(
+		const obs_sceneitem_group_t *group);
+
+EXPORT void obs_sceneitem_group_ungroup(obs_sceneitem_group_t *group);
+
+EXPORT void obs_sceneitem_group_add_item(obs_sceneitem_group_t *group,
+		obs_sceneitem_t *item);
+EXPORT void obs_sceneitem_group_remove_item(obs_sceneitem_t *item);
 
 
 /* ------------------------------------------------------------------------- */

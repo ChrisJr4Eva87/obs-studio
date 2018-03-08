@@ -32,6 +32,8 @@ struct obs_scene_item {
 	volatile long         ref;
 	volatile bool         removed;
 
+	bool                  is_group;
+
 	int64_t               id;
 
 	struct obs_scene      *parent;
@@ -80,6 +82,7 @@ struct obs_scene_item {
 
 struct obs_scene {
 	struct obs_source     *source;
+	struct obs_scene_item *group_sceneitem;
 
 	int64_t               id_counter;
 

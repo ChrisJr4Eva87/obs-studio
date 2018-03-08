@@ -2042,3 +2042,349 @@ obs_data_t *obs_sceneitem_get_private_settings(obs_sceneitem_t *item)
 	obs_data_addref(item->private_settings);
 	return item->private_settings;
 }
+
+obs_sceneitem_group_t *obs_scene_insert_group(obs_scene_t *scene,
+		const char *name, obs_sceneitem_t **items, size_t count)
+{
+	if (!count || !items || !*items)
+		return NULL;
+
+	obs_scene_t *sub_scene = obs_scene_create_private(name);
+
+	sub_scene->first_item = items[0];
+
+	obs_sceneitem_t *item = obs_scene_add_internal(
+			scene, sub_scene->source, items[count - 1]);
+	sub_scene->group_sceneitem = item;
+
+	/* ------------------------- */
+
+	full_lock(scene);
+	for (size_t i = count; i > 0; i--) {
+		size_t idx = i - 1;
+		detach_sceneitem(items[idx]);
+	}
+	for (size_t i = 0; i < count; i++) {
+		size_t idx = i;
+		if (idx != (count - 1)) {
+			size_t next_idx = idx + 1;
+			items[idx]->next = items[next_idx];
+			items[next_idx]->prev = items[idx];
+		} else {
+			items[idx]->next = NULL;
+		}
+		items[idx]->parent = sub_scene;
+	}
+	items[0]->prev = NULL;
+	full_unlock(scene);
+
+	/* ------------------------- */
+
+	/* TODO: signals/transform stuff */
+
+	return (obs_sceneitem_group_t *)item;
+}
+
+obs_sceneitem_group_t *obs_sceneitem_group_from_item(obs_sceneitem_t *item)
+{
+	return (item && item->is_group) ? (obs_sceneitem_group_t *)item : NULL;
+}
+
+obs_sceneitem_t *obs_sceneitem_group_get_item(
+		const obs_sceneitem_group_t *group)
+{
+	return (obs_sceneitem_t *)group;
+}
+
+obs_scene_t *obs_sceneitem_group_get_scene(
+		const obs_sceneitem_group_t *group)
+{
+	const obs_sceneitem_t *item = (const obs_sceneitem_t *)group;
+	return item ? item->source->context.data : NULL;
+}
+
+obs_source_t *obs_sceneitem_group_get_source(
+		const obs_sceneitem_group_t *group)
+{
+	const obs_sceneitem_t *item = (const obs_sceneitem_t *)group;
+	return item ? item->source : NULL;
+}
+
+void obs_sceneitem_group_ungroup(obs_sceneitem_group_t *group)
+{
+	if (!group)
+		return;
+
+	obs_sceneitem_t *item = (obs_sceneitem_t *)group;
+	obs_scene_t *scene = item->parent;
+	obs_scene_t *subscene = item->source->context.data;
+	obs_sceneitem_t *first;
+	obs_sceneitem_t *last;
+
+	/* ------------------------- */
+
+	full_lock(subscene);
+	first = subscene->first_item;
+	last = first;
+	for (;;) {
+		last->parent = scene;
+		if (!last->next)
+			break;
+		last = last->next;
+	}
+	subscene->first_item = NULL;
+	full_unlock(subscene);
+
+	/* ------------------------- */
+
+	full_lock(scene);
+	if (item->prev) {
+		first->prev = item->prev;
+		item->next = first;
+	} else {
+		scene->first_item = first;
+		first->prev = NULL;
+	}
+	last->next = item->next;
+	if (last->next)
+		last->next->prev = last;
+	item->next = item->prev = NULL;
+	item->parent = NULL;
+	full_unlock(scene);
+
+	/* ------------------------- */
+
+	/* TODO: update signal/transform stuff */
+
+	/* ------------------------- */
+
+	obs_sceneitem_release(item);
+}
+
+void obs_sceneitem_group_add_item(obs_sceneitem_group_t *group,
+		obs_sceneitem_t *item)
+{
+	if (!group || !item)
+		return;
+
+	obs_sceneitem_t *groupitem = (obs_sceneitem_t *)group;
+	obs_scene_t *scene = groupitem->parent;
+	obs_scene_t *groupscene = groupitem->source->context.data;
+	obs_sceneitem_t *last;
+
+	if (item->parent != scene)
+		return;
+
+	/* ------------------------- */
+
+	full_lock(scene);
+	detach_sceneitem(item);
+	full_unlock(scene);
+
+	/* ------------------------- */
+
+	full_lock(groupscene);
+	last = groupscene->first_item;
+	if (last) {
+		for (;;) {
+			if (!last->next)
+				break;
+			last = last->next;
+		}
+		last->next = item;
+		item->prev = last;
+	} else {
+		groupscene->first_item = item;
+	}
+	item->parent = groupscene;
+	item->next = NULL;
+	full_unlock(groupscene);
+
+	/* ------------------------- */
+
+	/* TODO: update signal/transform stuff */
+}
+
+void obs_sceneitem_group_remove_item(obs_sceneitem_t *item)
+{
+	if (!item)
+		return;
+
+	obs_scene_t *groupscene = item->parent;
+	obs_sceneitem_t *groupitem = groupscene->group_sceneitem;
+	if (!groupitem)
+		return;
+
+	obs_scene_t *scene = groupitem->parent;
+
+	/* ------------------------- */
+
+	full_lock(groupscene);
+	detach_sceneitem(item);
+	full_unlock(groupscene);
+
+	/* ------------------------- */
+
+	full_lock(scene);
+	if (groupitem->prev) {
+		groupitem->prev->next = item;
+		item->prev = groupitem->prev;
+	} else {
+		scene->first_item = item;
+		item->prev = NULL;
+	}
+	groupitem->prev = item;
+	item->next = groupitem;
+	item->parent = scene;
+	full_unlock(scene);
+
+	/* ------------------------- */
+
+	/* TODO: update signal/transform stuff */
+}
+
+static void build_current_order_info(obs_scene_t *scene,
+		struct obs_sceneitem_order_info **items_out,
+		size_t *size_out)
+{
+	DARRAY(struct obs_sceneitem_order_info) items;
+	da_init(items);
+
+	obs_sceneitem_t *item = scene->first_item;
+	while (item) {
+		struct obs_sceneitem_order_info info = {
+			.group = NULL,
+			.item = item
+		};
+
+		da_push_back(items, &item);
+
+		if (item->is_group) {
+			obs_scene_t *sub_scene = item->source->context.data;
+
+			full_lock(sub_scene);
+
+			obs_sceneitem_t *sub_item = sub_scene->first_item;
+
+			while (sub_item) {
+				info.group = item;
+				info.item = sub_item;
+				da_push_back(items, &item);
+
+				sub_item = sub_item->next;
+			}
+
+			full_unlock(sub_scene);
+		}
+
+		item = item->next;
+	}
+
+	*items_out = items.array;
+	*size_out = items.num;
+}
+
+static bool sceneitems_match2(obs_scene_t *scene,
+		struct obs_sceneitem_order_info *items,
+		size_t size, bool *order_matches)
+{
+	obs_sceneitem_t *item = scene->first_item;
+	struct obs_sceneitem_order_info *cur_items;
+	size_t cur_size;
+
+	build_current_order_info(scene, &cur_items, &cur_size);
+	if (cur_size != size) {
+		bfree(cur_items);
+		return false;
+	}
+
+	for (size_t i = 0; i < size; i++) {
+		struct obs_sceneitem_order_info *new = &items[i];
+		struct obs_sceneitem_order_info *old = &cur_items[i];
+
+		if (new->group != old->group || new->item != new->item) {
+			bfree(cur_items);
+			return false;
+		}
+	}
+
+	bfree(cur_items);
+	return true;
+}
+
+bool obs_scene_reorder_items2(obs_scene_t *scene,
+		struct obs_sceneitem_order_info *item_order,
+		size_t item_order_size)
+{
+	if (!scene || !item_order_size || !item_order)
+		return false;
+
+	obs_scene_addref(scene);
+	full_lock(scene);
+
+	bool order_matches = true;
+	if (!sceneitems_match2(scene, item_order, item_order_size,
+				&order_matches) || order_matches) {
+		full_unlock(scene);
+		obs_scene_release(scene);
+		return false;
+	}
+
+	scene->first_item = item_order[0].item;
+
+	obs_sceneitem_t *prev = NULL;
+	for (size_t i = 0; i < item_order_size; i++) {
+		struct obs_sceneitem_order_info *info = &item_order[i];
+		obs_sceneitem_t *item = info->item;
+
+		if (info->group) {
+			obs_sceneitem_t *sub_prev = NULL;
+			obs_sceneitem_t *item = info->item;
+			obs_scene_t *sub_scene =
+				info->group->source->context.data;
+
+			sub_scene->first_item = item;
+
+			obs_scene_addref(sub_scene);
+			full_lock(sub_scene);
+
+			for (; i < item_order_size; i++) {
+				struct obs_sceneitem_order_info *sub_info =
+					&item_order[i];
+				obs_sceneitem_t *sub_item = sub_info->item;
+
+				if (sub_info->group != info->group) {
+					i--;
+					break;
+				}
+
+				sub_item->prev = sub_prev;
+				sub_item->next = NULL;
+				sub_item->parent = sub_scene;
+
+				if (sub_prev)
+					sub_prev->next = sub_item;
+
+				sub_prev = sub_item;
+			}
+
+			full_unlock(sub_scene);
+			obs_scene_release(sub_scene);
+		} else {
+			item->prev = prev;
+			item->next = NULL;
+			item->parent = scene;
+
+			if (prev)
+				prev->next = item;
+
+			prev = item;
+		}
+	}
+
+	signal_reorder(scene->first_item);
+
+	full_unlock(scene);
+	obs_scene_release(scene);
+	return true;
+}
