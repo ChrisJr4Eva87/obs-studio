@@ -3840,6 +3840,12 @@ void OBSBasic::CreateSourcePopupMenu(int idx, bool preview)
 	ui->actionCopyFilters->setEnabled(false);
 	ui->actionCopySource->setEnabled(false);
 
+	if (ui->sources->MultipleBaseSelected()) {
+		popup.addSeparator();
+		popup.addAction(QTStr("Basic.Main.GroupItems"),
+				ui->sources, SLOT(GroupSelectedItems()));
+	}
+
 	popup.addSeparator();
 	popup.addAction(ui->actionCopySource);
 	popup.addAction(ui->actionPasteRef);
@@ -3930,18 +3936,6 @@ void OBSBasic::on_sources_customContextMenuRequested(const QPoint &pos)
 		QModelIndex idx = ui->sources->indexAt(pos);
 		CreateSourcePopupMenu(idx.row(), false);
 	}
-}
-
-void OBSBasic::on_sources_itemDoubleClicked(QListWidgetItem *witem)
-{
-	if (!witem)
-		return;
-
-	OBSSceneItem item = GetSceneItem(witem);
-	OBSSource source = obs_sceneitem_get_source(item);
-
-	if (source)
-		CreatePropertiesWindow(source);
 }
 
 void OBSBasic::on_scenes_itemDoubleClicked(QListWidgetItem *witem)

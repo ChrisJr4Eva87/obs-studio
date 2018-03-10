@@ -51,22 +51,21 @@ MuteCheckBox::indicator:unchecked {
     image: url(:/res/images/unmute.png);
 }
 
-ExpandCheckBox {
+SourceTreeSubItemCheckBox {
     outline: none;
 }
 
-ExpandCheckBox::indicator {
-    width: 16px;
-    height: 16px;
+SourceTreeSubItemCheckBox::indicator {
+    width: 10px;
+    height: 10px;
 }
 
-ExpandCheckBox::indicator:checked {
-    image: url(:/res/images/add.png);
+SourceTreeSubItemCheckBox::indicator:checked {
+    image: url(:/res/images/expand.png);
 }
 
-ExpandCheckBox::indicator:unchecked {
-    image: url(:/res/images/list_remove.png);
-    icon-size: 
+SourceTreeSubItemCheckBox::indicator:unchecked {
+    image: url(:/res/images/collapse.png);
 }
 
 OBSHotkeyLabel[hotkeyPairHover=true] {

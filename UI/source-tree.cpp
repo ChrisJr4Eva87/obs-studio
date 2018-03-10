@@ -21,6 +21,12 @@
 #include <QStylePainter>
 #include <QStyleOptionFocusRect>
 
+static inline OBSScene GetCurrentScene()
+{
+	OBSBasic *main = reinterpret_cast<OBSBasic*>(App()->GetMainWindow());
+	return main->GetCurrentScene();
+}
+
 /* ========================================================================= */
 
 SourceTreeItem::SourceTreeItem(SourceTree *tree_, OBSSceneItem sceneitem_)
@@ -31,11 +37,6 @@ SourceTreeItem::SourceTreeItem(SourceTree *tree_, OBSSceneItem sceneitem_)
 
 	obs_source_t *source = obs_sceneitem_get_source(sceneitem);
 	const char *name = obs_source_get_name(source);
-
-	expand = new ExpandCheckBox();
-	expand->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Maximum);
-	expand->setMaximumSize(16, 16);
-	expand->setIconSize(QSize(16, 16));
 
 	vis = new VisibilityCheckBox();
 	vis->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Maximum);
@@ -53,14 +54,49 @@ SourceTreeItem::SourceTreeItem(SourceTree *tree_, OBSSceneItem sceneitem_)
 	label->setAttribute(Qt::WA_TranslucentBackground);
 
 	boxLayout = new QHBoxLayout();
+	boxLayout->setContentsMargins(1, 1, 2, 1);
 	boxLayout->setSpacing(1);
-	boxLayout->setContentsMargins(0, 0, 0, 0);
-	boxLayout->addWidget(expand);
+	boxLayout->addWidget(label);
 	boxLayout->addWidget(vis);
 	boxLayout->addWidget(lock);
-	boxLayout->addWidget(label);
+
+	Update(false);
 
 	setLayout(boxLayout);
+
+	/* --------------------------------------------------------- */
+
+	auto setItemVisible = [this] (bool checked)
+	{
+		SignalBlocker sourcesSignalBlocker(this);
+		obs_sceneitem_set_visible(sceneitem, checked);
+	};
+
+	auto setItemLocked = [this] (bool checked)
+	{
+		SignalBlocker sourcesSignalBlocker(this);
+		obs_sceneitem_set_locked(sceneitem, checked);
+	};
+
+	connect(vis, &QAbstractButton::clicked, setItemVisible);
+	connect(lock, &QAbstractButton::clicked, setItemLocked);
+}
+
+void SourceTreeItem::DisconnectSignals()
+{
+	sceneRemoveSignal.Disconnect();
+	itemRemoveSignal.Disconnect();
+	visibleSignal.Disconnect();
+	renameSignal.Disconnect();
+	removeSignal.Disconnect();
+}
+
+void SourceTreeItem::ReconnectSignals()
+{
+	if (!sceneitem)
+		return;
+
+	DisconnectSignals();
 
 	/* --------------------------------------------------------- */
 
@@ -71,10 +107,7 @@ SourceTreeItem::SourceTreeItem(SourceTree *tree_, OBSSceneItem sceneitem_)
 			(obs_sceneitem_t*)calldata_ptr(cd, "item");
 
 		if (!curItem || curItem == this_->sceneitem) {
-			this_->sceneRemoveSignal.Disconnect();
-			this_->itemRemoveSignal.Disconnect();
-			this_->visibleSignal.Disconnect();
-			this_->renameSignal.Disconnect();
+			this_->DisconnectSignals();
 			this_->sceneitem = nullptr;
 		}
 	};
@@ -110,40 +143,33 @@ SourceTreeItem::SourceTreeItem(SourceTree *tree_, OBSSceneItem sceneitem_)
 				Q_ARG(QString, QT_UTF8(name)));
 	};
 
+	auto removeSource = [] (void *data, calldata_t *cd)
+	{
+		SourceTreeItem *this_ = reinterpret_cast<SourceTreeItem*>(data);
+		this_->DisconnectSignals();
+		this_->sceneitem = nullptr;
+	};
+
+	obs_source_t *source = obs_sceneitem_get_source(sceneitem);
 	signal = obs_source_get_signal_handler(source);
 	renameSignal.Connect(signal, "rename", renamed, this);
-
-	/* --------------------------------------------------------- */
-
-	auto setItemVisible = [this] (bool checked)
-	{
-		SignalBlocker sourcesSignalBlocker(this);
-		obs_sceneitem_set_visible(sceneitem, checked);
-	};
-
-	auto setItemLocked = [this] (bool checked)
-	{
-		SignalBlocker sourcesSignalBlocker(this);
-		obs_sceneitem_set_locked(sceneitem, checked);
-	};
-
-	connect(vis, &QAbstractButton::clicked, setItemVisible);
-	connect(lock, &QAbstractButton::clicked, setItemLocked);
+	removeSignal.Connect(signal, "remove", removeSource, this);
 }
 
-void SourceTreeItem::mousePressEvent(QMouseEvent *event)
+void SourceTreeItem::mouseDoubleClickEvent(QMouseEvent *event)
 {
-	QWidget::mousePressEvent(event);
-}
+	QWidget::mouseDoubleClickEvent(event);
 
-void SourceTreeItem::mouseMoveEvent(QMouseEvent *event)
-{
-	QWidget::mouseMoveEvent(event);
-}
-
-void SourceTreeItem::mouseReleaseEvent(QMouseEvent *event)
-{
-	QWidget::mouseReleaseEvent(event);
+	if (expand) {
+		expand->setChecked(!expand->isChecked());
+	} else {
+		obs_source_t *source = obs_sceneitem_get_source(sceneitem);
+		OBSBasic *main =
+			reinterpret_cast<OBSBasic*>(App()->GetMainWindow());
+		if (source) {
+			main->CreatePropertiesWindow(source);
+		}
+	}
 }
 
 void SourceTreeItem::EnterEditMode()
@@ -152,7 +178,7 @@ void SourceTreeItem::EnterEditMode()
 	boxLayout->removeWidget(label);
 	editor = new QLineEdit(label->text());
 	editor->installEventFilter(this);
-	boxLayout->addWidget(editor);
+	boxLayout->insertWidget(1, editor);
 	setFocusProxy(editor);
 }
 
@@ -173,7 +199,7 @@ void SourceTreeItem::ExitEditMode(bool save)
 	delete editor;
 	editor = nullptr;
 	setFocusPolicy(Qt::NoFocus);
-	boxLayout->addWidget(label);
+	boxLayout->insertWidget(1, label);
 }
 
 bool SourceTreeItem::eventFilter(QObject *object, QEvent *event)
@@ -221,6 +247,98 @@ void SourceTreeItem::Renamed(const QString &name)
 	label->setText(name);
 }
 
+void SourceTreeItem::Update(bool force)
+{
+	OBSScene scene = GetCurrentScene();
+	obs_scene_t *itemScene = obs_sceneitem_get_scene(sceneitem);
+
+	Type newType;
+
+	/* ------------------------------------------------- */
+	/* if it's a group item, insert group checkbox       */
+
+	if (!!obs_sceneitem_group_from_item(sceneitem)) {
+		newType = Type::Group;
+
+	/* ------------------------------------------------- */
+	/* if it's a group sub-item                          */
+
+	} else if (itemScene != scene) {
+		newType = Type::SubItem;
+
+	/* ------------------------------------------------- */
+	/* if it's a regular item                            */
+
+	} else {
+		newType = Type::Item;
+	}
+
+	/* ------------------------------------------------- */
+
+	if (!force && newType == type) {
+		return;
+	}
+
+	/* ------------------------------------------------- */
+
+	ReconnectSignals();
+
+	if (spacer) {
+		boxLayout->removeItem(spacer);
+		delete spacer;
+		spacer = nullptr;
+	}
+
+	if (type == Type::Group) {
+		boxLayout->removeWidget(expand);
+		expand->deleteLater();
+		expand = nullptr;
+	}
+
+	type = newType;
+
+	if (type == Type::SubItem) {
+		spacer = new QSpacerItem(16, 1);
+		boxLayout->insertItem(0, spacer);
+
+	} else if (type == Type::Group) {
+		expand = new SourceTreeSubItemCheckBox();
+		expand->setSizePolicy(
+				QSizePolicy::Maximum,
+				QSizePolicy::Maximum);
+		expand->setMaximumSize(10, 16);
+		expand->setMinimumSize(10, 0);
+		boxLayout->insertWidget(0, expand);
+
+		obs_data_t *data = obs_sceneitem_get_private_settings(sceneitem);
+		expand->blockSignals(true);
+		expand->setChecked(obs_data_get_bool(data, "collapsed"));
+		expand->blockSignals(false);
+		obs_data_release(data);
+
+		connect(expand, &QPushButton::toggled,
+				this, &SourceTreeItem::ExpandClicked);
+
+	} else {
+		int space = tree->GetStm()->hasGroups ? 10 : 3;
+		spacer = new QSpacerItem(space, 1);
+		boxLayout->insertItem(0, spacer);
+	}
+}
+
+void SourceTreeItem::ExpandClicked(bool checked)
+{
+	OBSData data = obs_sceneitem_get_private_settings(sceneitem);
+	obs_data_release(data);
+
+	obs_data_set_bool(data, "collapsed", checked);
+
+	if (!checked)
+		tree->GetStm()->ExpandGroup(sceneitem);
+	else
+		tree->GetStm()->CollapseGroup(sceneitem);
+}
+
 /* ========================================================================= */
 
 void SourceTreeModel::OBSFrontendEvent(enum obs_frontend_event event, void *ptr)
@@ -243,34 +361,51 @@ void SourceTreeModel::Clear()
 	beginResetModel();
 	items.clear();
 	endResetModel();
+
+	hasGroups = false;
+}
+
+static bool enumItem(obs_scene_t*, obs_sceneitem_t *item, void *ptr)
+{
+	QVector<OBSSceneItem> &items =
+		*reinterpret_cast<QVector<OBSSceneItem>*>(ptr);
+
+	obs_sceneitem_group_t *group = obs_sceneitem_group_from_item(item);
+	if (group) {
+		obs_data_t *data = obs_sceneitem_get_private_settings(item);
+
+		bool collapse = obs_data_get_bool(data, "collapsed");
+		if (!collapse) {
+			obs_scene_t *scene =
+				obs_sceneitem_group_get_scene(group);
+
+			obs_scene_enum_items(scene, enumItem, &items);
+		}
+
+		obs_data_release(data);
+	}
+
+	items.insert(0, item);
+	return true;
 }
 
 void SourceTreeModel::SceneChanged()
 {
-	OBSBasic *main = reinterpret_cast<OBSBasic*>(App()->GetMainWindow());
-	OBSScene scene = main->GetCurrentScene();
-
-	auto enumItem = [] (obs_scene_t*, obs_sceneitem_t *item, void *ptr)
-	{
-		QVector<OBSSceneItem> &items =
-			*reinterpret_cast<QVector<OBSSceneItem>*>(ptr);
-		items.insert(0, item);
-		return true;
-	};
+	OBSScene scene = GetCurrentScene();
 
 	beginResetModel();
 	items.clear();
 	obs_scene_enum_items(scene, enumItem, &items);
 	endResetModel();
 
+	UpdateGroupState(false);
 	st->ResetWidgets();
 }
 
 /* reorders list optimally with model reorder funcs */
 void SourceTreeModel::ReorderItems()
 {
-	OBSBasic *main = reinterpret_cast<OBSBasic*>(App()->GetMainWindow());
-	OBSScene scene = main->GetCurrentScene();
+	OBSScene scene = GetCurrentScene();
 
 	QVector<OBSSceneItem> newitems;
 	auto enumItem = [] (obs_scene_t*, obs_sceneitem_t *item, void *ptr)
@@ -364,14 +499,42 @@ void SourceTreeModel::Add(obs_sceneitem_t *item)
 
 void SourceTreeModel::Remove(obs_sceneitem_t *item)
 {
+	int idx = -1;
 	for (int i = 0; i < items.count(); i++) {
 		if (items[i] == item) {
-			beginRemoveRows(QModelIndex(), i, i);
-			items.remove(i);
-			endRemoveRows();
+			idx = i;
 			break;
 		}
 	}
+
+	if (idx == -1)
+		return;
+
+	obs_sceneitem_group_t *group = obs_sceneitem_group_from_item(item);
+	int startIdx = idx;
+	int endIdx = idx;
+
+	if (!!group) {
+		obs_scene_t *scene = obs_sceneitem_group_get_scene(group);
+
+		for (int i = endIdx + 1; i < items.count(); i++) {
+			obs_sceneitem_t *subitem = items[i];
+			obs_scene_t *subscene =
+				obs_sceneitem_get_scene(subitem);
+
+			if (subscene == scene)
+				endIdx = i;
+			else
+				break;
+		}
+	}
+
+	beginRemoveRows(QModelIndex(), startIdx, endIdx);
+	items.remove(idx, endIdx - startIdx + 1);
+	endRemoveRows();
+
+	if (!!group)
+		UpdateGroupState(true);
 }
 
 OBSSceneItem SourceTreeModel::Get(int idx)
@@ -419,6 +582,122 @@ Qt::DropActions SourceTreeModel::supportedDropActions() const
 	return QAbstractItemModel::supportedDropActions() | Qt::MoveAction;
 }
 
+void SourceTreeModel::GroupSelectedItems(QModelIndexList &indices)
+{
+	OBSScene scene = GetCurrentScene();
+	QString name;
+
+	int i = 1;
+	for (;;) {
+		name = QTStr("Basic.Main.Group").arg(QString::number(i++));
+		obs_sceneitem_group_t *group = obs_scene_get_group(scene,
+				QT_TO_UTF8(name));
+		if (!group)
+			break;
+	}
+
+	QVector<obs_sceneitem_t *> item_order;
+
+	for (int i = indices.count() - 1; i >= 0; i--) {
+		obs_sceneitem_t *item = items[indices[i].row()];
+		item_order << item;
+	}
+
+	obs_sceneitem_group_t *group = obs_scene_insert_group(
+			scene, QT_TO_UTF8(name),
+			item_order.data(), item_order.size());
+
+	obs_sceneitem_t *item = obs_sceneitem_group_get_item(group);
+
+	int newIdx = indices[0].row();
+
+	beginInsertRows(QModelIndex(), newIdx, newIdx);
+	items.insert(newIdx, item);
+	endInsertRows();
+
+	for (int i = 0; i < indices.size(); i++) {
+		int fromIdx = indices[i].row() + 1;
+		int toIdx = newIdx + i + 1;
+		if (fromIdx != toIdx) {
+			beginMoveRows(QModelIndex(), fromIdx, fromIdx,
+			              QModelIndex(), toIdx);
+			items.move(fromIdx, toIdx);
+			endMoveRows();
+		}
+	}
+
+	hasGroups = true;
+	st->UpdateWidgets(true);
+}
+
+void SourceTreeModel::ExpandGroup(obs_sceneitem_t *item)
+{
+	int itemIdx = items.indexOf(item);
+	if (itemIdx == -1)
+		return;
+
+	itemIdx++;
+
+	obs_sceneitem_group_t *group = obs_sceneitem_group_from_item(item);
+	obs_scene_t *scene = obs_sceneitem_group_get_scene(group);
+
+	QVector<OBSSceneItem> subItems;
+	obs_scene_enum_items(scene, enumItem, &subItems);
+
+	if (!subItems.size())
+		return;
+
+	beginInsertRows(QModelIndex(), itemIdx, itemIdx + subItems.size() - 1);
+	for (int i = 0; i < subItems.size(); i++)
+		items.insert(i + itemIdx, subItems[i]);
+	endInsertRows();
+
+	st->UpdateWidgets();
+}
+
+void SourceTreeModel::CollapseGroup(obs_sceneitem_t *item)
+{
+	int startIdx = -1;
+	int endIdx = -1;
+
+	obs_sceneitem_group_t *group = obs_sceneitem_group_from_item(item);
+	obs_scene_t *scene = obs_sceneitem_group_get_scene(group);
+
+	for (int i = 0; i < items.size(); i++) {
+		obs_scene_t *itemScene = obs_sceneitem_get_scene(items[i]);
+
+		if (itemScene == scene) {
+			if (startIdx == -1)
+				startIdx = i;
+			endIdx = i;
+		}
+	}
+
+	if (startIdx == -1)
+		return;
+
+	beginRemoveRows(QModelIndex(), startIdx, endIdx);
+	items.remove(startIdx, endIdx - startIdx + 1);
+	endRemoveRows();
+}
+
+void SourceTreeModel::UpdateGroupState(bool update)
+{
+	bool nowHasGroups = false;
+	for (auto &item : items) {
+		if (!!obs_sceneitem_group_from_item(item)) {
+			nowHasGroups = true;
+			break;
+		}
+	}
+
+	if (nowHasGroups != hasGroups) {
+		hasGroups = nowHasGroups;
+		if (update)
+			st->UpdateWidgets(true);
+	}
+}
+
 /* ========================================================================= */
 
 SourceTree::SourceTree(QWidget *parent_) : QListView(parent_)
@@ -429,7 +708,11 @@ SourceTree::SourceTree(QWidget *parent_) : QListView(parent_)
 
 void SourceTree::ResetWidgets()
 {
+	OBSScene scene = GetCurrentScene();
+
 	SourceTreeModel *stm = GetStm();
+	stm->UpdateGroupState(false);
+
 	for (int i = 0; i < stm->items.count(); i++) {
 		QModelIndex index = stm->createIndex(i, 0, nullptr);
 		setIndexWidget(index, new SourceTreeItem(this, stm->items[i]));
@@ -439,6 +722,22 @@ void SourceTree::ResetWidgets()
 void SourceTree::UpdateWidget(const QModelIndex &idx, obs_sceneitem_t *item)
 {
 	setIndexWidget(idx, new SourceTreeItem(this, item));
+}
+
+void SourceTree::UpdateWidgets(bool force)
+{
+	SourceTreeModel *stm = GetStm();
+
+	for (int i = 0; i < stm->items.size(); i++) {
+		obs_sceneitem_t *item = stm->items[i];
+		SourceTreeItem *widget = GetItemWidget(i);
+
+		if (!widget) {
+			UpdateWidget(stm->createIndex(i, 0), item);
+		} else {
+			widget->Update(force);
+		}
+	}
 }
 
 void SourceTree::SelectItem(obs_sceneitem_t *sceneitem, bool select)
@@ -514,9 +813,7 @@ void SourceTree::dropEvent(QDropEvent *event)
 		event->accept();
 		event->setDropAction(Qt::CopyAction);
 
-		OBSBasic *main =
-			reinterpret_cast<OBSBasic*>(App()->GetMainWindow());
-		OBSScene scene = main->GetCurrentScene();
+		OBSScene scene = GetCurrentScene();
 
 		auto updateScene = [] (void *data, obs_scene_t *scene)
 		{
@@ -574,4 +871,56 @@ void SourceTree::Edit(int row)
 	SourceTreeItem *itemWidget = reinterpret_cast<SourceTreeItem *>(widget);
 	itemWidget->EnterEditMode();
 	edit(stm->createIndex(row, 0));
+}
+
+bool SourceTree::MultipleBaseSelected() const
+{
+	SourceTreeModel *stm = GetStm();
+	QModelIndexList selectedIndices = selectedIndexes();
+
+	OBSScene scene = GetCurrentScene();
+
+	if (selectedIndices.size() < 2) {
+		return false;
+	}
+
+	for (auto &idx : selectedIndices) {
+		obs_sceneitem_t *item = stm->items[idx.row()];
+		obs_scene *itemScene = obs_sceneitem_get_scene(item);
+
+		if (itemScene != scene) {
+			return false;
+		}
+	}
+
+	return true;
+}
+
+bool SourceTree::GroupedItemsSelected() const
+{
+	SourceTreeModel *stm = GetStm();
+	QModelIndexList selectedIndices = selectedIndexes();
+	OBSScene scene = GetCurrentScene();
+
+	if (!selectedIndices.size()) {
+		return false;
+	}
+
+	for (auto &idx : selectedIndices) {
+		obs_sceneitem_t *item = stm->items[idx.row()];
+		obs_scene *itemScene = obs_sceneitem_get_scene(item);
+
+		if (itemScene != scene) {
+			return true;
+		}
+	}
+
+	return false;
+}
+
+void SourceTree::GroupSelectedItems()
+{
+	QModelIndexList indices = selectedIndexes();
+	std::sort(indices.begin(), indices.end());
+	GetStm()->GroupSelectedItems(indices);
 }

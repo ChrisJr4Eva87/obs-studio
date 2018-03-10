@@ -586,19 +586,31 @@ static void set_visibility(struct obs_scene_item *item, bool vis)
 	pthread_mutex_unlock(&item->actions_mutex);
 }
 
+static void scene_load(void *data, obs_data_t *settings);
+
 static void scene_load_item(struct obs_scene *scene, obs_data_t *item_data)
 {
 	const char            *name = obs_data_get_string(item_data, "name");
-	obs_source_t          *source = obs_get_source_by_name(name);
+	obs_source_t          *source;
 	const char            *scale_filter_str;
 	struct obs_scene_item *item;
+	bool is_group;
 	bool visible;
 	bool lock;
 
-	if (!source) {
-		blog(LOG_WARNING, "[scene_load_item] Source %s not found!",
-				name);
-		return;
+	is_group = obs_data_get_bool(item_data, "is_group");
+
+	if (is_group) {
+		obs_scene_t *sub_scene = obs_scene_create_private(name);
+		source = sub_scene->source;
+
+	} else {
+		source = obs_get_source_by_name(name);
+		if (!source) {
+			blog(LOG_WARNING, "[scene_load_item] Source %s not "
+					"found!", name);
+			return;
+		}
 	}
 
 	item = obs_scene_add(scene, source);
@@ -609,6 +621,11 @@ static void scene_load_item(struct obs_scene *scene, obs_data_t *item_data)
 		
 		obs_source_release(source);
 		return;
+	}
+
+	if (is_group) {
+		item->is_group = true;
+		((obs_scene_t *)source->context.data)->group_sceneitem = item;
 	}
 
 	obs_data_set_default_int(item_data, "align",
@@ -644,6 +661,13 @@ static void scene_load_item(struct obs_scene *scene, obs_data_t *item_data)
 	item->crop.top    = (uint32_t)obs_data_get_int(item_data, "crop_top");
 	item->crop.right  = (uint32_t)obs_data_get_int(item_data, "crop_right");
 	item->crop.bottom = (uint32_t)obs_data_get_int(item_data, "crop_bottom");
+
+	if (item->is_group) {
+		obs_data_t *group_data = obs_data_get_obj(item_data,
+				"group_source");
+		scene_load(source->context.data, group_data);
+		obs_data_release(group_data);
+	}
 
 	scale_filter_str = obs_data_get_string(item_data, "scale_filter");
 	item->scale_filter = OBS_SCALE_DISABLE;
@@ -700,6 +724,8 @@ static void scene_load(void *data, obs_data_t *settings)
 	obs_data_array_release(items);
 }
 
+static void scene_save(void *data, obs_data_t *settings);
+
 static void scene_save_item(obs_data_array_t *array,
 		struct obs_scene_item *item)
 {
@@ -722,6 +748,14 @@ static void scene_save_item(obs_data_array_t *array,
 	obs_data_set_int  (item_data, "crop_right",   (int)item->crop.right);
 	obs_data_set_int  (item_data, "crop_bottom",  (int)item->crop.bottom);
 	obs_data_set_int  (item_data, "id",           item->id);
+	obs_data_set_bool (item_data, "is_group",     item->is_group);
+
+	if (item->is_group) {
+		obs_data_t *group_data = obs_data_create();
+		scene_save(item->source->context.data, group_data);
+		obs_data_set_obj(item_data, "group_source", group_data);
+		obs_data_release(group_data);
+	}
 
 	if (item->scale_filter == OBS_SCALE_POINT)
 		scale_filter = "point";
@@ -2046,20 +2080,28 @@ obs_data_t *obs_sceneitem_get_private_settings(obs_sceneitem_t *item)
 obs_sceneitem_group_t *obs_scene_insert_group(obs_scene_t *scene,
 		const char *name, obs_sceneitem_t **items, size_t count)
 {
-	if (!count || !items || !*items)
+	if (!scene)
 		return NULL;
 
 	obs_scene_t *sub_scene = obs_scene_create_private(name);
-
-	sub_scene->first_item = items[0];
+	obs_sceneitem_t *last_item = items ? items[count - 1] : NULL;
 
 	obs_sceneitem_t *item = obs_scene_add_internal(
-			scene, sub_scene->source, items[count - 1]);
+			scene, sub_scene->source, last_item);
 	sub_scene->group_sceneitem = item;
+	item->is_group = true;
+
+	obs_scene_release(sub_scene);
+
+	if (!items || !count)
+		return (obs_sceneitem_group_t *)item;
 
 	/* ------------------------- */
 
 	full_lock(scene);
+	full_lock(sub_scene);
+	sub_scene->first_item = items ? items[0] : NULL;
+
 	for (size_t i = count; i > 0; i--) {
 		size_t idx = i - 1;
 		detach_sceneitem(items[idx]);
@@ -2076,6 +2118,7 @@ obs_sceneitem_group_t *obs_scene_insert_group(obs_scene_t *scene,
 		items[idx]->parent = sub_scene;
 	}
 	items[0]->prev = NULL;
+	full_unlock(sub_scene);
 	full_unlock(scene);
 
 	/* ------------------------- */
@@ -2083,6 +2126,34 @@ obs_sceneitem_group_t *obs_scene_insert_group(obs_scene_t *scene,
 	/* TODO: signals/transform stuff */
 
 	return (obs_sceneitem_group_t *)item;
+}
+
+obs_sceneitem_group_t *obs_scene_get_group(obs_scene_t *scene, const char *name)
+{
+	if (!scene || !name || !*name) {
+		return NULL;
+	}
+
+	obs_sceneitem_t *group = NULL;
+	obs_sceneitem_t *item;
+
+	full_lock(scene);
+
+	item = scene->first_item;
+	while (item) {
+		if (item->is_group && item->source->context.name) {
+			if (strcmp(item->source->context.name, name) == 0) {
+				group = item;
+				break;
+			}
+		}
+
+		item = item->next;
+	}
+
+	full_unlock(scene);
+
+	return (obs_sceneitem_group_t *)group;
 }
 
 obs_sceneitem_group_t *obs_sceneitem_group_from_item(obs_sceneitem_t *item)

@@ -4,6 +4,7 @@
 #include <QVector>
 #include <QPointer>
 #include <QListView>
+#include <QCheckBox>
 #include <QAbstractListModel>
 
 class QLabel;
@@ -16,22 +17,39 @@ class LockedCheckBox;
 class VisibilityCheckBox;
 class VisibilityItemWidget;
 
+class SourceTreeSubItemCheckBox : public QCheckBox {
+	Q_OBJECT
+};
+
 class SourceTreeItem : public QWidget {
 	Q_OBJECT
 
 	friend class SourceTree;
 	friend class SourceTreeModel;
 
-	void mousePressEvent(QMouseEvent *event) override;
-	void mouseMoveEvent(QMouseEvent *event) override;
-	void mouseReleaseEvent(QMouseEvent *event) override;
+	void mouseDoubleClickEvent(QMouseEvent *event) override;
 
 	virtual bool eventFilter(QObject *object, QEvent *event) override;
+
+	void Update(bool force);
+
+	enum class Type {
+		Unknown,
+		Item,
+		Group,
+		SubItem,
+	};
+
+	void DisconnectSignals();
+	void ReconnectSignals();
+
+	Type type = Type::Unknown;
 
 public:
 	explicit SourceTreeItem(SourceTree *tree, OBSSceneItem sceneitem);
 
 private:
+	QSpacerItem *spacer = nullptr;
 	QCheckBox *expand = nullptr;
 	VisibilityCheckBox *vis = nullptr;
 	LockedCheckBox *lock = nullptr;
@@ -46,6 +64,7 @@ private:
 	OBSSignal itemRemoveSignal;
 	OBSSignal visibleSignal;
 	OBSSignal renameSignal;
+	OBSSignal removeSignal;
 
 private slots:
 	void EnterEditMode();
@@ -53,15 +72,19 @@ private slots:
 
 	void VisibilityChanged(bool visible);
 	void Renamed(const QString &name);
+
+	void ExpandClicked(bool checked);
 };
 
 class SourceTreeModel : public QAbstractListModel {
 	Q_OBJECT
 
 	friend class SourceTree;
+	friend class SourceTreeItem;
 
 	SourceTree *st;
 	QVector<OBSSceneItem> items;
+	bool hasGroups = false;
 
 	static void OBSFrontendEvent(enum obs_frontend_event event, void *ptr);
 	void Clear();
@@ -71,6 +94,13 @@ class SourceTreeModel : public QAbstractListModel {
 	void Add(obs_sceneitem_t *item);
 	void Remove(obs_sceneitem_t *item);
 	OBSSceneItem Get(int idx);
+
+	void GroupSelectedItems(QModelIndexList &indices);
+
+	void ExpandGroup(obs_sceneitem_t *item);
+	void CollapseGroup(obs_sceneitem_t *item);
+
+	void UpdateGroupState(bool update);
 
 public:
 	explicit SourceTreeModel(SourceTree *st);
@@ -89,13 +119,21 @@ class SourceTree : public QListView {
 	bool ignoreReorder = false;
 
 	friend class SourceTreeModel;
+	friend class SourceTreeItem;
 
 	void ResetWidgets();
 	void UpdateWidget(const QModelIndex &idx, obs_sceneitem_t *item);
+	void UpdateWidgets(bool force = false);
 
 	inline SourceTreeModel *GetStm() const
 	{
 		return reinterpret_cast<SourceTreeModel *>(model());
+	}
+
+	inline SourceTreeItem *GetItemWidget(int idx)
+	{
+		QWidget *widget = indexWidget(GetStm()->createIndex(idx, 0));
+		return reinterpret_cast<SourceTreeItem *>(widget);
 	}
 
 public:
@@ -112,6 +150,12 @@ public:
 	void SelectItem(obs_sceneitem_t *sceneitem, bool select);
 
 	void Edit(int idx);
+
+	bool MultipleBaseSelected() const;
+	bool GroupedItemsSelected() const;
+
+public slots:
+	void GroupSelectedItems();
 
 protected:
 	virtual void mouseDoubleClickEvent(QMouseEvent *event) override;

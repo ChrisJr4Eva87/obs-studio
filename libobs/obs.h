@@ -1435,6 +1435,9 @@ EXPORT obs_data_t *obs_sceneitem_get_private_settings(obs_sceneitem_t *item);
 EXPORT obs_sceneitem_group_t *obs_scene_insert_group(obs_scene_t *scene,
 		const char *name, obs_sceneitem_t **items, size_t count);
 
+EXPORT obs_sceneitem_group_t *obs_scene_get_group(obs_scene_t *scene,
+		const char *name);
+
 EXPORT obs_sceneitem_group_t *obs_sceneitem_group_from_item(
 		obs_sceneitem_t *item);
 
