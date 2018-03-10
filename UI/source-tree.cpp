@@ -10,6 +10,8 @@
 #include <obs-frontend-api.h>
 #include <obs.h>
 
+#include <string>
+
 #include <QLabel>
 #include <QLineEdit>
 #include <QSpacerItem>
@@ -187,12 +189,10 @@ void SourceTreeItem::ExitEditMode(bool save)
 	if (!editor)
 		return;
 
-	if (save) {
-		SignalBlocker sourcesSignalBlocker(this);
-		obs_source_t *source = obs_sceneitem_get_source(sceneitem);
-		obs_source_set_name(source, QT_TO_UTF8(editor->text()));
-		label->setText(editor->text());
-	}
+	OBSBasic *main = reinterpret_cast<OBSBasic*>(App()->GetMainWindow());
+	OBSScene scene = main->GetCurrentScene();
+
+	std::string newName = QT_TO_UTF8(editor->text());
 
 	setFocusProxy(nullptr);
 	boxLayout->removeWidget(editor);
@@ -200,6 +200,49 @@ void SourceTreeItem::ExitEditMode(bool save)
 	editor = nullptr;
 	setFocusPolicy(Qt::NoFocus);
 	boxLayout->insertWidget(1, label);
+
+	/* ----------------------------------------- */
+	/* check for empty string                    */
+
+	if (!save)
+		return;
+
+	if (newName.empty()) {
+		OBSMessageBox::information(main,
+			QTStr("NoNameEntered.Title"),
+			QTStr("NoNameEntered.Text"));
+		return;
+	}
+
+	/* ----------------------------------------- */
+	/* check for existing source                 */
+
+	obs_sceneitem_group_t *group = obs_sceneitem_group_from_item(sceneitem);
+	obs_source_t *source = obs_sceneitem_get_source(sceneitem);
+	bool exists = false;
+
+	if (!!group) {
+		exists = !!obs_scene_get_group(scene, newName.c_str());
+	} else {
+		obs_source_t *existingSource =
+			obs_get_source_by_name(newName.c_str());
+		obs_source_release(existingSource);
+		exists = !!existingSource;
+	}
+
+	if (exists) {
+		OBSMessageBox::information(main,
+			QTStr("NameExists.Title"),
+			QTStr("NameExists.Text"));
+		return;
+	}
+
+	/* ----------------------------------------- */
+	/* rename                                    */
+
+	SignalBlocker sourcesSignalBlocker(this);
+	obs_source_set_name(source, newName.c_str());
+	label->setText(QT_UTF8(newName.c_str()));
 }
 
 bool SourceTreeItem::eventFilter(QObject *object, QEvent *event)
@@ -571,10 +614,13 @@ Qt::ItemFlags SourceTreeModel::flags(const QModelIndex &index) const
 	if (!index.isValid())
 		return QAbstractListModel::flags(index) | Qt::ItemIsDropEnabled;
 
+	obs_sceneitem_t *item = items[index.row()];
+	bool isGroup = obs_sceneitem_group_from_item(item);
+
 	return QAbstractListModel::flags(index) |
 	       Qt::ItemIsEditable |
-	       Qt::ItemIsDragEnabled /*| TODO: if group, allow "drop in"
-	       Qt::ItemIsDropEnabled*/;
+	       Qt::ItemIsDragEnabled |
+	       (isGroup ? Qt::ItemIsDropEnabled : 0);
 }
 
 Qt::DropActions SourceTreeModel::supportedDropActions() const
@@ -693,8 +739,9 @@ void SourceTreeModel::UpdateGroupState(bool update)
 
 	if (nowHasGroups != hasGroups) {
 		hasGroups = nowHasGroups;
-		if (update)
+		if (update) {
 			st->UpdateWidgets(true);
+		}
 	}
 }
 
@@ -777,62 +824,8 @@ void SourceTree::dropEvent(QDropEvent *event)
 
 	SourceTreeModel *stm = GetStm();
 	QModelIndexList indices = selectedIndexes();
-	QList<QPersistentModelIndex> persistentIndices;
 
-	persistentIndices.reserve(indices.count());
-	for (QModelIndex &index : indices)
-		persistentIndices.append(index);
-	std::sort(persistentIndices.begin(), persistentIndices.end());
-
-	DropIndicatorPosition indicator = dropIndicatorPosition();
-	int row = indexAt(event->pos()).row();
-
-	if (indicator == QAbstractItemView::BelowItem)
-		row++;
-
-	if (row >= 0 && row <= stm->items.count()) {
-		int r = row;
-		for (auto persistentIdx : persistentIndices) {
-			int from = persistentIdx.row();
-			int to = r;
-			int itemTo = to;
-
-			if (itemTo > from)
-				itemTo--;
-
-			if (itemTo != from) {
-				stm->beginMoveRows(QModelIndex(), from, from,
-						  QModelIndex(), to);
-				stm->items.move(from, itemTo);
-				stm->endMoveRows();
-			}
-
-			r = persistentIdx.row() + 1;
-		}
-
-		event->accept();
-		event->setDropAction(Qt::CopyAction);
-
-		OBSScene scene = GetCurrentScene();
-
-		auto updateScene = [] (void *data, obs_scene_t *scene)
-		{
-			QVector<OBSSceneItem> &items =
-				*reinterpret_cast<QVector<OBSSceneItem>*>(data);
-
-			QVector<obs_sceneitem_t*> ptrList;
-			ptrList.reserve(items.size());
-			for (OBSSceneItem &item : items)
-				ptrList.insert(0, item);
-
-			obs_scene_reorder_items(scene, ptrList.data(),
-					ptrList.size());
-		};
-
-		ignoreReorder = true;
-		obs_scene_atomic_update(scene, updateScene, &stm->items);
-		ignoreReorder = false;
-	}
+	
 
 	QListView::dropEvent(event);
 }
