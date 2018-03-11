@@ -822,10 +822,256 @@ void SourceTree::dropEvent(QDropEvent *event)
 		return;
 	}
 
+	OBSScene scene = GetCurrentScene();
 	SourceTreeModel *stm = GetStm();
+	auto &items = stm->items;
 	QModelIndexList indices = selectedIndexes();
 
-	
+	DropIndicatorPosition indicator = dropIndicatorPosition();
+	int row = indexAt(event->pos()).row();
+
+	if (row == -1) {
+		QListView::dropEvent(event);
+		return;
+	}
+
+	/* --------------------------------------- */
+	/* store destination group if moving to a  */
+	/* group                                   */
+
+	obs_sceneitem_t *dropItem = items[row];
+	bool itemIsGroup = !!obs_sceneitem_group_from_item(dropItem);
+
+	obs_sceneitem_t *dropGroup = itemIsGroup
+		? dropItem
+		: obs_sceneitem_get_group(dropItem);
+
+	/* not a group if moving above the group */
+	if (indicator == QAbstractItemView::AboveItem && itemIsGroup)
+		dropGroup = nullptr;
+
+	/* --------------------------------------- */
+	/* remember to remove list items if        */
+	/* dropping on collapsed group             */
+
+	bool dropOnCollapsed = false;
+	if (dropGroup) {
+		obs_data_t *data = obs_sceneitem_get_private_settings(dropGroup);
+		dropOnCollapsed = obs_data_get_bool(data, "collapsed");
+		obs_data_release(data);
+	}
+
+	if (indicator == QAbstractItemView::BelowItem ||
+	    indicator == QAbstractItemView::OnItem)
+		row++;
+
+	if (row < 0 || row > stm->items.count()) {
+		QListView::dropEvent(event);
+		return;
+	}
+
+	/* --------------------------------------- */
+	/* determine if any base group is selected */
+
+	bool hasGroups = false;
+	for (int i = 0; i < indices.size(); i++) {
+		obs_sceneitem_t *item = items[indices[i].row()];
+		if (!!obs_sceneitem_group_from_item(item)) {
+			hasGroups = true;
+			break;
+		}
+	}
+
+	/* --------------------------------------- */
+	/* if dropping groups on other groups,     */
+	/* disregard as invalid drag/drop          */
+
+	if (dropGroup && hasGroups) {
+		QListView::dropEvent(event);
+		return;
+	}
+
+	/* --------------------------------------- */
+	/* if selection includes base group items, */
+	/* include all group sub-items and treat   */
+	/* them all as one                         */
+
+	if (hasGroups) {
+		/* remove sub-items if selected */
+		for (int i = indices.size() - 1; i >= 0; i--) {
+			obs_sceneitem_t *item = items[indices[i].row()];
+			obs_scene_t *itemScene = obs_sceneitem_get_scene(item);
+
+			if (itemScene != scene) {
+				indices.removeAt(i);
+			}
+		}
+
+		/* add all sub-items of selected groups */
+		for (int i = indices.size() - 1; i >= 0; i--) {
+			obs_sceneitem_t *item = items[indices[i].row()];
+
+			if (!!obs_sceneitem_group_from_item(item)) {
+				for (int j = items.size() - 1; j >= 0; j--) {
+					obs_sceneitem_t *subitem = items[j];
+					obs_sceneitem_t *subitemGroup =
+						obs_sceneitem_get_group(subitem);
+
+					if (subitemGroup == item) {
+						QModelIndex idx =
+							stm->createIndex(j, 0);
+						indices.insert(i + 1, idx);
+					}
+				}
+			}
+		}
+	}
+
+	/* --------------------------------------- */
+	/* build persistent indices                */
+
+	QList<QPersistentModelIndex> persistentIndices;
+	persistentIndices.reserve(indices.count());
+	for (QModelIndex &index : indices)
+		persistentIndices.append(index);
+	std::sort(persistentIndices.begin(), persistentIndices.end());
+
+	/* --------------------------------------- */
+	/* move all items to destination index     */
+
+	int r = row;
+	for (auto &persistentIdx : persistentIndices) {
+		int from = persistentIdx.row();
+		int to = r;
+		int itemTo = to;
+
+		if (itemTo > from)
+			itemTo--;
+
+		if (itemTo != from) {
+			stm->beginMoveRows(QModelIndex(), from, from,
+			                   QModelIndex(), to);
+			items.move(from, itemTo);
+			stm->endMoveRows();
+		}
+
+		r = persistentIdx.row() + 1;
+	}
+
+	std::sort(persistentIndices.begin(), persistentIndices.end());
+	int firstIdx = persistentIndices.front().row();
+	int lastIdx = persistentIndices.back().row();
+
+	/* --------------------------------------- */
+	/* reorder scene items in back-end         */
+
+	QVector<struct obs_sceneitem_order_info> orderList;
+	obs_sceneitem_t *lastGroup = nullptr;
+	int insertCollapsedIdx = 0;
+
+	auto insertCollapsed = [&] (obs_sceneitem_t *item)
+	{
+		struct obs_sceneitem_order_info info;
+		info.group = lastGroup;
+		info.item = item;
+
+		orderList.insert(insertCollapsedIdx++, info);
+	};
+
+	using insertCollapsed_t = decltype(insertCollapsed);
+
+	auto preInsertCollapsed = [] (obs_scene_t *, obs_sceneitem_t *item,
+			void *param)
+	{
+		(*reinterpret_cast<insertCollapsed_t *>(param))(item);
+		return true;
+	};
+
+	auto insertLastGroup = [&] ()
+	{
+		obs_data_t *data = obs_sceneitem_get_private_settings(lastGroup);
+		bool collapsed = obs_data_get_bool(data, "collapsed");
+		obs_data_release(data);
+
+		if (collapsed) {
+			insertCollapsedIdx = 0;
+			obs_sceneitem_group_enum_items(
+					lastGroup,
+					preInsertCollapsed,
+					&insertCollapsed);
+		}
+
+		struct obs_sceneitem_order_info info;
+		info.group = nullptr;
+		info.item = lastGroup;
+		orderList.insert(0, info);
+	};
+
+	auto updateScene = [&] ()
+	{
+		struct obs_sceneitem_order_info info;
+
+		for (int i = 0; i < items.size(); i++) {
+			obs_sceneitem_t *item = items[i];
+			obs_sceneitem_t *group;
+
+			if (!!obs_sceneitem_group_from_item(item)) {
+				lastGroup = item;
+				continue;
+			}
+
+			if (!hasGroups && i >= firstIdx && i <= lastIdx)
+				group = dropGroup;
+			else
+				group = obs_sceneitem_get_group(item);
+
+			if (lastGroup && lastGroup != group) {
+				insertLastGroup();
+			}
+
+			lastGroup = group;
+
+			info.group = group;
+			info.item = item;
+			orderList.insert(0, info);
+		}
+
+		if (lastGroup) {
+			insertLastGroup();
+		}
+
+		obs_scene_reorder_items2(scene,
+				orderList.data(), orderList.size());
+	};
+
+	using updateScene_t = decltype(updateScene);
+
+	auto preUpdateScene = [] (void *data, obs_scene_t *scene)
+	{
+		(*reinterpret_cast<updateScene_t *>(data))();
+	};
+
+	ignoreReorder = true;
+	obs_scene_atomic_update(scene, preUpdateScene, &updateScene);
+	ignoreReorder = false;
+
+	/* --------------------------------------- */
+	/* remove items if dropped in to collapsed */
+	/* group                                   */
+
+	if (dropOnCollapsed) {
+		stm->beginRemoveRows(QModelIndex(), firstIdx, lastIdx);
+		items.remove(firstIdx, lastIdx - firstIdx + 1);
+		stm->endRemoveRows();
+	}
+
+	/* --------------------------------------- */
+	/* update widgets and accept event         */
+
+	UpdateWidgets(true);
+
+	event->accept();
+	event->setDropAction(Qt::CopyAction);
 
 	QListView::dropEvent(event);
 }

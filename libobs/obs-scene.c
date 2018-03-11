@@ -67,6 +67,7 @@ static void *scene_create(obs_data_t *settings, struct obs_source *source)
 	struct obs_scene *scene = bmalloc(sizeof(struct obs_scene));
 	scene->source     = source;
 	scene->first_item = NULL;
+	scene->group_sceneitem = NULL;
 
 	signal_handler_add_array(obs_source_get_signal_handler(source),
 			obs_scene_signals);
@@ -2356,8 +2357,7 @@ static void build_current_order_info(obs_scene_t *scene,
 }
 
 static bool sceneitems_match2(obs_scene_t *scene,
-		struct obs_sceneitem_order_info *items,
-		size_t size, bool *order_matches)
+		struct obs_sceneitem_order_info *items, size_t size)
 {
 	obs_sceneitem_t *item = scene->first_item;
 	struct obs_sceneitem_order_info *cur_items;
@@ -2394,8 +2394,7 @@ bool obs_scene_reorder_items2(obs_scene_t *scene,
 	full_lock(scene);
 
 	bool order_matches = true;
-	if (!sceneitems_match2(scene, item_order, item_order_size,
-				&order_matches) || order_matches) {
+	if (sceneitems_match2(scene, item_order, item_order_size)) {
 		full_unlock(scene);
 		obs_scene_release(scene);
 		return false;
@@ -2410,7 +2409,6 @@ bool obs_scene_reorder_items2(obs_scene_t *scene,
 
 		if (info->group) {
 			obs_sceneitem_t *sub_prev = NULL;
-			obs_sceneitem_t *item = info->item;
 			obs_scene_t *sub_scene =
 				info->group->source->context.data;
 
@@ -2458,4 +2456,21 @@ bool obs_scene_reorder_items2(obs_scene_t *scene,
 	full_unlock(scene);
 	obs_scene_release(scene);
 	return true;
+}
+
+obs_sceneitem_t *obs_sceneitem_get_group(obs_sceneitem_t *item)
+{
+	return item && item->parent ? item->parent->group_sceneitem : NULL;
+}
+
+void obs_sceneitem_group_enum_items(obs_sceneitem_t *group,
+		bool (*callback)(obs_scene_t*, obs_sceneitem_t*, void*),
+		void *param)
+{
+	if (!group)
+		return;
+
+	obs_scene_t *scene = obs_scene_from_source(group->source);
+	if (scene)
+		obs_scene_enum_items(scene, callback, param);
 }
