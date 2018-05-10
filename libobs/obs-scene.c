@@ -2407,25 +2407,28 @@ bool obs_scene_reorder_items2(obs_scene_t *scene,
 		struct obs_sceneitem_order_info *info = &item_order[i];
 		obs_sceneitem_t *item = info->item;
 
-		if (info->group) {
+		if (info->item->is_group) {
 			obs_sceneitem_t *sub_prev = NULL;
 			obs_scene_t *sub_scene =
-				info->group->source->context.data;
+				info->item->source->context.data;
 
-			sub_scene->first_item = item;
+			sub_scene->first_item = NULL;
 
 			obs_scene_addref(sub_scene);
 			full_lock(sub_scene);
 
-			for (; i < item_order_size; i++) {
+			for (i++; i < item_order_size; i++) {
 				struct obs_sceneitem_order_info *sub_info =
 					&item_order[i];
 				obs_sceneitem_t *sub_item = sub_info->item;
 
-				if (sub_info->group != info->group) {
+				if (sub_info->group != info->item) {
 					i--;
 					break;
 				}
+
+				if (!sub_scene->first_item)
+					sub_scene->first_item = sub_item;
 
 				sub_item->prev = sub_prev;
 				sub_item->next = NULL;
@@ -2439,16 +2442,16 @@ bool obs_scene_reorder_items2(obs_scene_t *scene,
 
 			full_unlock(sub_scene);
 			obs_scene_release(sub_scene);
-		} else {
-			item->prev = prev;
-			item->next = NULL;
-			item->parent = scene;
-
-			if (prev)
-				prev->next = item;
-
-			prev = item;
 		}
+
+		item->prev = prev;
+		item->next = NULL;
+		item->parent = scene;
+
+		if (prev)
+			prev->next = item;
+
+		prev = item;
 	}
 
 	signal_reorder(scene->first_item);
