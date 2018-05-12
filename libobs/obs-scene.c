@@ -2078,6 +2078,15 @@ obs_data_t *obs_sceneitem_get_private_settings(obs_sceneitem_t *item)
 	return item->private_settings;
 }
 
+static inline transform_val(struct vec2 *v2, struct matrix4 *transform)
+{
+	struct vec3 v;
+	vec3_set(&v, v2->x, v2->y, 0.0f);
+	vec3_transform(&v, &v, transform);
+	v2->x = v.x;
+	v2->y = v.y;
+}
+
 static void remove_group_transform(obs_sceneitem_t *item)
 {
 	obs_scene_t *parent = item->parent;
@@ -2085,14 +2094,70 @@ static void remove_group_transform(obs_sceneitem_t *item)
 		return;
 
 	obs_sceneitem_t *group = parent->group_sceneitem;
-	vec2_add(&item->pos, &item->pos, &group->pos);
+
+	struct matrix4 transform;
+	matrix4_copy(&transform, &group->draw_transform);
+
+	transform_val(&item->pos, &transform);
+	vec4_set(&transform.t, 0.0f, 0.0f, 0.0f, 1.0f);
+	transform_val(&item->scale, &transform);
+
 	update_item_transform(item);
 }
 
 static void apply_group_transform(obs_sceneitem_t *item, obs_sceneitem_t *group)
 {
-	vec2_sub(&item->pos, &item->pos, &group->pos);
+	struct matrix4 transform;
+	matrix4_inv(&transform, &group->draw_transform);
+
+	transform_val(&item->pos, &transform);
+	vec4_set(&transform.t, 0.0f, 0.0f, 0.0f, 1.0f);
+	transform_val(&item->scale, &transform);
+
 	update_item_transform(item);
+}
+
+/* assumes group scene and parent scene is locked */
+static void reposition_group(obs_sceneitem_t *group)
+{
+	obs_scene_t *scene = group->source->context.data;
+	struct vec2 minv;
+	vec2_set(&minv, M_INFINITE, M_INFINITE);
+
+	obs_sceneitem_t *item = scene->first_item;
+	if (!item) {
+		return;
+	}
+
+	while (item) {
+#define set_min(x_val, y_val) \
+		do { \
+			struct vec3 v; \
+			vec3_set(&v, x_val, y_val, 0.0f); \
+			vec3_transform(&v, &v, &item->box_transform); \
+			if (v.x < minv.x) minv.x = v.x; \
+			if (v.y < minv.y) minv.y = v.y; \
+		} while (false)
+
+		set_min(0.0f, 0.0f);
+		set_min(1.0f, 0.0f);
+		set_min(0.0f, 1.0f);
+		set_min(1.0f, 1.0f);
+#undef set_min
+		
+		item = item->next;
+	}
+
+	item = scene->first_item;
+	while (item) {
+		vec2_sub(&item->pos, &item->pos, &minv);
+		update_item_transform(item);
+		item = item->next;
+	}
+
+	transform_val(&minv, &group->draw_transform);
+	vec2_copy(&group->pos, &minv);
+	update_item_transform(group);
 }
 
 obs_sceneitem_group_t *obs_scene_insert_group(obs_scene_t *scene,
@@ -2135,9 +2200,10 @@ obs_sceneitem_group_t *obs_scene_insert_group(obs_scene_t *scene,
 			items[idx]->next = NULL;
 		}
 		items[idx]->parent = sub_scene;
-		apply_group_transform(items[idx], sub_scene->group_sceneitem);
+		apply_group_transform(items[idx], item);
 	}
 	items[0]->prev = NULL;
+	reposition_group(item);
 	full_unlock(sub_scene);
 	full_unlock(scene);
 
@@ -2272,7 +2338,6 @@ void obs_sceneitem_group_add_item(obs_sceneitem_group_t *group,
 	full_lock(scene);
 	remove_group_transform(item);
 	detach_sceneitem(item);
-	full_unlock(scene);
 
 	/* ------------------------- */
 
@@ -2292,7 +2357,12 @@ void obs_sceneitem_group_add_item(obs_sceneitem_group_t *group,
 	item->parent = groupscene;
 	item->next = NULL;
 	apply_group_transform(item, groupitem);
+	reposition_group(groupitem);
 	full_unlock(groupscene);
+
+	/* ------------------------- */
+
+	full_unlock(scene);
 
 	/* ------------------------- */
 
@@ -2313,14 +2383,13 @@ void obs_sceneitem_group_remove_item(obs_sceneitem_t *item)
 
 	/* ------------------------- */
 
+	full_lock(scene);
 	full_lock(groupscene);
 	remove_group_transform(item);
 	detach_sceneitem(item);
-	full_unlock(groupscene);
 
 	/* ------------------------- */
 
-	full_lock(scene);
 	if (groupitem->prev) {
 		groupitem->prev->next = item;
 		item->prev = groupitem->prev;
@@ -2331,6 +2400,11 @@ void obs_sceneitem_group_remove_item(obs_sceneitem_t *item)
 	groupitem->prev = item;
 	item->next = groupitem;
 	item->parent = scene;
+
+	/* ------------------------- */
+
+	reposition_group(groupitem);
+	full_unlock(groupscene);
 	full_unlock(scene);
 
 	/* ------------------------- */
@@ -2473,6 +2547,7 @@ bool obs_scene_reorder_items2(obs_scene_t *scene,
 				sub_prev = sub_item;
 			}
 
+			reposition_group(info->item);
 			full_unlock(sub_scene);
 			obs_scene_release(sub_scene);
 		}
