@@ -2106,11 +2106,25 @@ static void remove_group_transform(obs_sceneitem_t *item)
 	obs_sceneitem_t *group = parent->group_sceneitem;
 
 	struct matrix4 transform;
+	struct matrix4 mat;
+	struct vec4 x_base;
+
+	vec4_set(&x_base, 1.0f, 0.0f, 0.0f, 0.0f);
+
 	matrix4_copy(&transform, &group->draw_transform);
 
 	transform_val(&item->pos, &transform);
 	vec4_set(&transform.t, 0.0f, 0.0f, 0.0f, 1.0f);
-	transform_val(&item->scale, &transform);
+
+	vec4_set(&mat.x, item->scale.x, 0.0f, 0.0f, 0.0f);
+	vec4_set(&mat.y, 0.0f, item->scale.y, 0.0f, 0.0f);
+	vec4_set(&mat.z, 0.0f, 0.0f, 1.0f, 0.0f);
+	vec4_set(&mat.t, 0.0f, 0.0f, 0.0f, 1.0f);
+	matrix4_mul(&mat, &mat, &transform);
+
+	item->scale.x = vec4_len(&mat.x);
+	item->scale.y = vec4_len(&mat.y);
+	item->rot += group->rot;
 
 	update_item_transform(item);
 }
@@ -2118,11 +2132,25 @@ static void remove_group_transform(obs_sceneitem_t *item)
 static void apply_group_transform(obs_sceneitem_t *item, obs_sceneitem_t *group)
 {
 	struct matrix4 transform;
+	struct matrix4 mat;
+	struct vec4 x_base;
+
+	vec4_set(&x_base, 1.0f, 0.0f, 0.0f, 0.0f);
+
 	matrix4_inv(&transform, &group->draw_transform);
 
 	transform_val(&item->pos, &transform);
 	vec4_set(&transform.t, 0.0f, 0.0f, 0.0f, 1.0f);
-	transform_val(&item->scale, &transform);
+
+	vec4_set(&mat.x, item->scale.x, 0.0f, 0.0f, 0.0f);
+	vec4_set(&mat.y, 0.0f, item->scale.y, 0.0f, 0.0f);
+	vec4_set(&mat.z, 0.0f, 0.0f, 1.0f, 0.0f);
+	vec4_set(&mat.t, 0.0f, 0.0f, 0.0f, 1.0f);
+	matrix4_mul(&mat, &mat, &transform);
+
+	item->scale.x = vec4_len(&mat.x);
+	item->scale.y = vec4_len(&mat.y);
+	item->rot -= group->rot;
 
 	update_item_transform(item);
 }
