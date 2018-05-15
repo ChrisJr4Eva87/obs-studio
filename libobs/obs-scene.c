@@ -2161,6 +2161,7 @@ static void reposition_group(obs_sceneitem_t *group)
 	obs_scene_t *scene = group->source->context.data;
 	struct vec2 minv;
 	struct vec2 maxv;
+	struct vec2 scale;
 
 	vec2_set(&minv, M_INFINITE, M_INFINITE);
 	vec2_set(&maxv, -M_INFINITE, -M_INFINITE);
@@ -2200,13 +2201,29 @@ static void reposition_group(obs_sceneitem_t *group)
 		item = item->next;
 	}
 
-	vec2_sub(&maxv, &maxv, &minv);
-	scene->cx = (uint32_t)ceilf(maxv.x);
-	scene->cy = (uint32_t)ceilf(maxv.y);
+	vec2_sub(&scale, &maxv, &minv);
+	scene->cx = (uint32_t)ceilf(scale.x);
+	scene->cy = (uint32_t)ceilf(scale.y);
 
 	if (group->bounds_type == OBS_BOUNDS_NONE) {
-		transform_val(&minv, &group->draw_transform);
-		vec2_copy(&group->pos, &minv);
+		struct vec2 new_pos;
+
+		if ((group->align & OBS_ALIGN_LEFT) != 0)
+			new_pos.x = minv.x;
+		else if ((group->align & OBS_ALIGN_RIGHT) != 0)
+			new_pos.x = maxv.x;
+		else
+			new_pos.x = (maxv.x - minv.x) * 0.5f + minv.x;
+
+		if ((group->align & OBS_ALIGN_TOP) != 0)
+			new_pos.y = minv.y;
+		else if ((group->align & OBS_ALIGN_BOTTOM) != 0)
+			new_pos.y = maxv.y;
+		else
+			new_pos.y = (maxv.y - minv.y) * 0.5f + minv.y;
+
+		transform_val(&new_pos, &group->draw_transform);
+		vec2_copy(&group->pos, &new_pos);
 	}
 
 	update_item_transform(group);
