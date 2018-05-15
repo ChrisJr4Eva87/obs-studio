@@ -722,6 +722,11 @@ static void scene_load(void *data, obs_data_t *settings)
 	if (obs_data_has_user_value(settings, "id_counter"))
 		scene->id_counter = obs_data_get_int(settings, "id_counter");
 
+	if (obs_data_get_bool(settings, "custom_size")) {
+		scene->cx = (uint32_t)obs_data_get_int(settings, "cx");
+		scene->cy = (uint32_t)obs_data_get_int(settings, "cy");
+	}
+
 	obs_data_array_release(items);
 }
 
@@ -793,6 +798,11 @@ static void scene_save(void *data, obs_data_t *settings)
 	}
 
 	obs_data_set_int(settings, "id_counter", scene->id_counter);
+	obs_data_set_bool(settings, "custom_size", scene->custom_size);
+	if (scene->custom_size) {
+		obs_data_set_int(settings, "cx", scene->cx);
+		obs_data_set_int(settings, "cy", scene->cy);
+	}
 
 	full_unlock(scene);
 
@@ -802,14 +812,14 @@ static void scene_save(void *data, obs_data_t *settings)
 
 static uint32_t scene_getwidth(void *data)
 {
-	UNUSED_PARAMETER(data);
-	return obs->video.base_width;
+	obs_scene_t *scene = data;
+	return scene->custom_size ? scene->cx : obs->video.base_width;
 }
 
 static uint32_t scene_getheight(void *data)
 {
-	UNUSED_PARAMETER(data);
-	return obs->video.base_height;
+	obs_scene_t *scene = data;
+	return scene->custom_size ? scene->cy : obs->video.base_height;
 }
 
 static void apply_scene_item_audio_actions(struct obs_scene_item *item,
@@ -2122,28 +2132,35 @@ static void reposition_group(obs_sceneitem_t *group)
 {
 	obs_scene_t *scene = group->source->context.data;
 	struct vec2 minv;
+	struct vec2 maxv;
+
 	vec2_set(&minv, M_INFINITE, M_INFINITE);
+	vec2_set(&maxv, -M_INFINITE, -M_INFINITE);
 
 	obs_sceneitem_t *item = scene->first_item;
 	if (!item) {
+		scene->cx = 0;
+		scene->cy = 0;
 		return;
 	}
 
 	while (item) {
-#define set_min(x_val, y_val) \
+#define get_min_max(x_val, y_val) \
 		do { \
 			struct vec3 v; \
 			vec3_set(&v, x_val, y_val, 0.0f); \
 			vec3_transform(&v, &v, &item->box_transform); \
 			if (v.x < minv.x) minv.x = v.x; \
 			if (v.y < minv.y) minv.y = v.y; \
+			if (v.x > maxv.x) maxv.x = v.x; \
+			if (v.y > maxv.y) maxv.y = v.y; \
 		} while (false)
 
-		set_min(0.0f, 0.0f);
-		set_min(1.0f, 0.0f);
-		set_min(0.0f, 1.0f);
-		set_min(1.0f, 1.0f);
-#undef set_min
+		get_min_max(0.0f, 0.0f);
+		get_min_max(1.0f, 0.0f);
+		get_min_max(0.0f, 1.0f);
+		get_min_max(1.0f, 1.0f);
+#undef get_min_max
 		
 		item = item->next;
 	}
@@ -2155,8 +2172,15 @@ static void reposition_group(obs_sceneitem_t *group)
 		item = item->next;
 	}
 
-	transform_val(&minv, &group->draw_transform);
-	vec2_copy(&group->pos, &minv);
+	vec2_sub(&maxv, &maxv, &minv);
+	scene->cx = (uint32_t)ceilf(maxv.x);
+	scene->cy = (uint32_t)ceilf(maxv.y);
+
+	if (group->bounds_type == OBS_BOUNDS_NONE) {
+		transform_val(&minv, &group->draw_transform);
+		vec2_copy(&group->pos, &minv);
+	}
+
 	update_item_transform(group);
 }
 
@@ -2172,6 +2196,7 @@ obs_sceneitem_group_t *obs_scene_insert_group(obs_scene_t *scene,
 	obs_sceneitem_t *item = obs_scene_add_internal(
 			scene, sub_scene->source, last_item);
 	sub_scene->group_sceneitem = item;
+	sub_scene->custom_size = true;
 	item->is_group = true;
 
 	obs_scene_release(sub_scene);

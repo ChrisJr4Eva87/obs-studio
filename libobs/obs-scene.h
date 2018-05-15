@@ -84,6 +84,10 @@ struct obs_scene {
 	struct obs_source     *source;
 	struct obs_scene_item *group_sceneitem;
 
+	bool                  custom_size;
+	uint32_t              cx;
+	uint32_t              cy;
+
 	int64_t               id_counter;
 
 	pthread_mutex_t       video_mutex;
