@@ -62,7 +62,6 @@ typedef struct obs_service    obs_service_t;
 typedef struct obs_module     obs_module_t;
 typedef struct obs_fader      obs_fader_t;
 typedef struct obs_volmeter   obs_volmeter_t;
-typedef struct obs_scene_item_group obs_sceneitem_group_t;
 
 typedef struct obs_weak_source  obs_weak_source_t;
 typedef struct obs_weak_output  obs_weak_output_t;
@@ -1432,25 +1431,20 @@ EXPORT void obs_sceneitem_defer_update_end(obs_sceneitem_t *item);
  * automatically.  Returns an incremented reference. */
 EXPORT obs_data_t *obs_sceneitem_get_private_settings(obs_sceneitem_t *item);
 
-EXPORT obs_sceneitem_group_t *obs_scene_insert_group(obs_scene_t *scene,
+EXPORT obs_sceneitem_t *obs_scene_insert_group(obs_scene_t *scene,
 		const char *name, obs_sceneitem_t **items, size_t count);
 
-EXPORT obs_sceneitem_group_t *obs_scene_get_group(obs_scene_t *scene,
+EXPORT obs_sceneitem_t *obs_scene_get_group(obs_scene_t *scene,
 		const char *name);
 
-EXPORT obs_sceneitem_group_t *obs_sceneitem_group_from_item(
-		obs_sceneitem_t *item);
+EXPORT bool obs_sceneitem_is_group(obs_sceneitem_t *item);
 
-EXPORT obs_sceneitem_t *obs_sceneitem_group_get_item(
-		const obs_sceneitem_group_t *group);
 EXPORT obs_scene_t *obs_sceneitem_group_get_scene(
-		const obs_sceneitem_group_t *group);
-EXPORT obs_source_t *obs_sceneitem_group_get_source(
-		const obs_sceneitem_group_t *group);
+		const obs_sceneitem_t *group);
 
-EXPORT void obs_sceneitem_group_ungroup(obs_sceneitem_group_t *group);
+EXPORT void obs_sceneitem_group_ungroup(obs_sceneitem_t *group);
 
-EXPORT void obs_sceneitem_group_add_item(obs_sceneitem_group_t *group,
+EXPORT void obs_sceneitem_group_add_item(obs_sceneitem_t *group,
 		obs_sceneitem_t *item);
 EXPORT void obs_sceneitem_group_remove_item(obs_sceneitem_t *item);
 

@@ -145,7 +145,7 @@ void SourceTreeItem::ReconnectSignals()
 				Q_ARG(QString, QT_UTF8(name)));
 	};
 
-	auto removeSource = [] (void *data, calldata_t *cd)
+	auto removeSource = [] (void *data, calldata_t *)
 	{
 		SourceTreeItem *this_ = reinterpret_cast<SourceTreeItem*>(data);
 		this_->DisconnectSignals();
@@ -217,11 +217,10 @@ void SourceTreeItem::ExitEditMode(bool save)
 	/* ----------------------------------------- */
 	/* check for existing source                 */
 
-	obs_sceneitem_group_t *group = obs_sceneitem_group_from_item(sceneitem);
 	obs_source_t *source = obs_sceneitem_get_source(sceneitem);
 	bool exists = false;
 
-	if (!!group) {
+	if (obs_sceneitem_is_group(sceneitem)) {
 		exists = !!obs_scene_get_group(scene, newName.c_str());
 	} else {
 		obs_source_t *existingSource =
@@ -300,7 +299,7 @@ void SourceTreeItem::Update(bool force)
 	/* ------------------------------------------------- */
 	/* if it's a group item, insert group checkbox       */
 
-	if (!!obs_sceneitem_group_from_item(sceneitem)) {
+	if (obs_sceneitem_is_group(sceneitem)) {
 		newType = Type::Group;
 
 	/* ------------------------------------------------- */
@@ -413,14 +412,13 @@ static bool enumItem(obs_scene_t*, obs_sceneitem_t *item, void *ptr)
 	QVector<OBSSceneItem> &items =
 		*reinterpret_cast<QVector<OBSSceneItem>*>(ptr);
 
-	obs_sceneitem_group_t *group = obs_sceneitem_group_from_item(item);
-	if (group) {
+	if (obs_sceneitem_is_group(item)) {
 		obs_data_t *data = obs_sceneitem_get_private_settings(item);
 
 		bool collapse = obs_data_get_bool(data, "collapsed");
 		if (!collapse) {
 			obs_scene_t *scene =
-				obs_sceneitem_group_get_scene(group);
+				obs_sceneitem_group_get_scene(item);
 
 			obs_scene_enum_items(scene, enumItem, &items);
 		}
@@ -553,12 +551,12 @@ void SourceTreeModel::Remove(obs_sceneitem_t *item)
 	if (idx == -1)
 		return;
 
-	obs_sceneitem_group_t *group = obs_sceneitem_group_from_item(item);
 	int startIdx = idx;
 	int endIdx = idx;
 
-	if (!!group) {
-		obs_scene_t *scene = obs_sceneitem_group_get_scene(group);
+	bool is_group = obs_sceneitem_is_group(item);
+	if (is_group) {
+		obs_scene_t *scene = obs_sceneitem_group_get_scene(item);
 
 		for (int i = endIdx + 1; i < items.count(); i++) {
 			obs_sceneitem_t *subitem = items[i];
@@ -576,7 +574,7 @@ void SourceTreeModel::Remove(obs_sceneitem_t *item)
 	items.remove(idx, endIdx - startIdx + 1);
 	endRemoveRows();
 
-	if (!!group)
+	if (is_group)
 		UpdateGroupState(true);
 }
 
@@ -604,7 +602,7 @@ int SourceTreeModel::rowCount(const QModelIndex &parent) const
 	return parent.isValid() ? 0 : items.count();
 }
 
-QVariant SourceTreeModel::data(const QModelIndex &index, int role) const
+QVariant SourceTreeModel::data(const QModelIndex &, int) const
 {
 	return QVariant();
 }
@@ -615,12 +613,12 @@ Qt::ItemFlags SourceTreeModel::flags(const QModelIndex &index) const
 		return QAbstractListModel::flags(index) | Qt::ItemIsDropEnabled;
 
 	obs_sceneitem_t *item = items[index.row()];
-	bool isGroup = obs_sceneitem_group_from_item(item);
+	bool is_group = obs_sceneitem_is_group(item);
 
 	return QAbstractListModel::flags(index) |
 	       Qt::ItemIsEditable |
 	       Qt::ItemIsDragEnabled |
-	       (isGroup ? Qt::ItemIsDropEnabled : 0);
+	       (is_group ? Qt::ItemIsDropEnabled : 0);
 }
 
 Qt::DropActions SourceTreeModel::supportedDropActions() const
@@ -636,7 +634,7 @@ void SourceTreeModel::GroupSelectedItems(QModelIndexList &indices)
 	int i = 1;
 	for (;;) {
 		name = QTStr("Basic.Main.Group").arg(QString::number(i++));
-		obs_sceneitem_group_t *group = obs_scene_get_group(scene,
+		obs_sceneitem_t *group = obs_scene_get_group(scene,
 				QT_TO_UTF8(name));
 		if (!group)
 			break;
@@ -649,11 +647,9 @@ void SourceTreeModel::GroupSelectedItems(QModelIndexList &indices)
 		item_order << item;
 	}
 
-	obs_sceneitem_group_t *group = obs_scene_insert_group(
+	obs_sceneitem_t *item = obs_scene_insert_group(
 			scene, QT_TO_UTF8(name),
 			item_order.data(), item_order.size());
-
-	obs_sceneitem_t *item = obs_sceneitem_group_get_item(group);
 
 	int newIdx = indices[0].row();
 
@@ -684,8 +680,7 @@ void SourceTreeModel::ExpandGroup(obs_sceneitem_t *item)
 
 	itemIdx++;
 
-	obs_sceneitem_group_t *group = obs_sceneitem_group_from_item(item);
-	obs_scene_t *scene = obs_sceneitem_group_get_scene(group);
+	obs_scene_t *scene = obs_sceneitem_group_get_scene(item);
 
 	QVector<OBSSceneItem> subItems;
 	obs_scene_enum_items(scene, enumItem, &subItems);
@@ -706,8 +701,7 @@ void SourceTreeModel::CollapseGroup(obs_sceneitem_t *item)
 	int startIdx = -1;
 	int endIdx = -1;
 
-	obs_sceneitem_group_t *group = obs_sceneitem_group_from_item(item);
-	obs_scene_t *scene = obs_sceneitem_group_get_scene(group);
+	obs_scene_t *scene = obs_sceneitem_group_get_scene(item);
 
 	for (int i = 0; i < items.size(); i++) {
 		obs_scene_t *itemScene = obs_sceneitem_get_scene(items[i]);
@@ -731,7 +725,7 @@ void SourceTreeModel::UpdateGroupState(bool update)
 {
 	bool nowHasGroups = false;
 	for (auto &item : items) {
-		if (!!obs_sceneitem_group_from_item(item)) {
+		if (obs_sceneitem_is_group(item)) {
 			nowHasGroups = true;
 			break;
 		}
@@ -840,7 +834,7 @@ void SourceTree::dropEvent(QDropEvent *event)
 	/* group                                   */
 
 	obs_sceneitem_t *dropItem = items[row];
-	bool itemIsGroup = !!obs_sceneitem_group_from_item(dropItem);
+	bool itemIsGroup = obs_sceneitem_is_group(dropItem);
 
 	obs_sceneitem_t *dropGroup = itemIsGroup
 		? dropItem
@@ -876,7 +870,7 @@ void SourceTree::dropEvent(QDropEvent *event)
 	bool hasGroups = false;
 	for (int i = 0; i < indices.size(); i++) {
 		obs_sceneitem_t *item = items[indices[i].row()];
-		if (!!obs_sceneitem_group_from_item(item)) {
+		if (obs_sceneitem_is_group(item)) {
 			hasGroups = true;
 			break;
 		}
@@ -911,7 +905,7 @@ void SourceTree::dropEvent(QDropEvent *event)
 		for (int i = indices.size() - 1; i >= 0; i--) {
 			obs_sceneitem_t *item = items[indices[i].row()];
 
-			if (!!obs_sceneitem_group_from_item(item)) {
+			if (obs_sceneitem_is_group(item)) {
 				for (int j = items.size() - 1; j >= 0; j--) {
 					obs_sceneitem_t *subitem = items[j];
 					obs_sceneitem_t *subitemGroup =
@@ -1015,7 +1009,7 @@ void SourceTree::dropEvent(QDropEvent *event)
 			obs_sceneitem_t *item = items[i];
 			obs_sceneitem_t *group;
 
-			if (!!obs_sceneitem_group_from_item(item)) {
+			if (obs_sceneitem_is_group(item)) {
 				lastGroup = item;
 				continue;
 			}
@@ -1046,7 +1040,7 @@ void SourceTree::dropEvent(QDropEvent *event)
 
 	using updateScene_t = decltype(updateScene);
 
-	auto preUpdateScene = [] (void *data, obs_scene_t *scene)
+	auto preUpdateScene = [] (void *data, obs_scene_t *)
 	{
 		(*reinterpret_cast<updateScene_t *>(data))();
 	};
