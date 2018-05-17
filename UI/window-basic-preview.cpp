@@ -1082,11 +1082,13 @@ static void DrawCircleAtPos(float x, float y, matrix4 &matrix,
 	struct vec3 pos;
 	vec3_set(&pos, x, y, 0.0f);
 	vec3_transform(&pos, &pos, &matrix);
-	vec3_mulf(&pos, &pos, previewScale);
 
 	gs_matrix_push();
 	gs_matrix_translate(&pos);
-	gs_matrix_scale3f(HANDLE_RADIUS, HANDLE_RADIUS, 1.0f);
+	gs_matrix_scale3f(
+			HANDLE_RADIUS / previewScale,
+			HANDLE_RADIUS / previewScale,
+			1.0f);
 	gs_draw(GS_LINESTRIP, 0, 0);
 	gs_matrix_pop();
 }
@@ -1107,6 +1109,16 @@ bool OBSBasicPreview::DrawSelectedItem(obs_scene_t *scene,
 
 	if (!SceneItemHasVideo(item))
 		return true;
+
+	if (obs_sceneitem_is_group(item)) {
+		matrix4 mat;
+		obs_sceneitem_get_draw_transform(item, &mat);
+
+		gs_matrix_push();
+		gs_matrix_mul(&mat);
+		obs_sceneitem_group_enum_items(item, DrawSelectedItem, param);
+		gs_matrix_pop();
+	}
 
 	if (!obs_sceneitem_selected(item))
 		return true;
@@ -1152,7 +1164,6 @@ bool OBSBasicPreview::DrawSelectedItem(obs_scene_t *scene,
 	DrawCircleAtPos(1.0f, 0.5f, boxTransform, main->previewScale);
 
 	gs_matrix_push();
-	gs_matrix_scale3f(main->previewScale, main->previewScale, 1.0f);
 	gs_matrix_mul(&boxTransform);
 
 	obs_sceneitem_crop crop;
@@ -1208,8 +1219,12 @@ void OBSBasicPreview::DrawSceneEditing()
 
 	OBSScene scene = main->GetCurrentScene();
 
-	if (scene)
+	if (scene) {
+		gs_matrix_push();
+		gs_matrix_scale3f(main->previewScale, main->previewScale, 1.0f);
 		obs_scene_enum_items(scene, DrawSelectedItem, this);
+		gs_matrix_pop();
+	}
 
 	gs_load_vertexbuffer(nullptr);
 
