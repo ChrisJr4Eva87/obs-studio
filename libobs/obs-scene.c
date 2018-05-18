@@ -20,6 +20,8 @@
 #include "graphics/math-defs.h"
 #include "obs-scene.h"
 
+static inline void resize_parent_group(obs_sceneitem_t *item, bool lock);
+
 /* NOTE: For proper mutex lock order (preventing mutual cross-locks), never
  * lock the graphics mutex inside either of the scene mutexes.
  *
@@ -415,7 +417,7 @@ static inline bool item_is_scene(const struct obs_scene_item *item)
 static inline bool item_texture_enabled(const struct obs_scene_item *item)
 {
 	return crop_enabled(&item->crop) || scale_filter_enabled(item) ||
-		item_is_scene(item);
+		(item_is_scene(item) && !item->is_group);
 }
 
 static void render_item_texture(struct obs_scene_item *item)
@@ -546,8 +548,10 @@ static void scene_video_render(void *data, gs_effect_t *effect)
 			continue;
 		}
 
-		if (source_size_changed(item))
+		if (source_size_changed(item)) {
 			update_item_transform(item);
+			resize_parent_group(item, false);
+		}
 
 		if (item->user_visible)
 			render_item(item);
@@ -1591,6 +1595,7 @@ void obs_sceneitem_set_pos(obs_sceneitem_t *item, const struct vec2 *pos)
 	if (item) {
 		vec2_copy(&item->pos, pos);
 		update_item_transform(item);
+		resize_parent_group(item, true);
 	}
 }
 
@@ -1599,6 +1604,7 @@ void obs_sceneitem_set_rot(obs_sceneitem_t *item, float rot)
 	if (item) {
 		item->rot = rot;
 		update_item_transform(item);
+		resize_parent_group(item, true);
 	}
 }
 
@@ -1607,6 +1613,7 @@ void obs_sceneitem_set_scale(obs_sceneitem_t *item, const struct vec2 *scale)
 	if (item) {
 		vec2_copy(&item->scale, scale);
 		update_item_transform(item);
+		resize_parent_group(item, true);
 	}
 }
 
@@ -1615,6 +1622,7 @@ void obs_sceneitem_set_alignment(obs_sceneitem_t *item, uint32_t alignment)
 	if (item) {
 		item->align = alignment;
 		update_item_transform(item);
+		resize_parent_group(item, true);
 	}
 }
 
@@ -1714,6 +1722,7 @@ void obs_sceneitem_set_bounds_type(obs_sceneitem_t *item,
 	if (item) {
 		item->bounds_type = type;
 		update_item_transform(item);
+		resize_parent_group(item, true);
 	}
 }
 
@@ -1723,6 +1732,7 @@ void obs_sceneitem_set_bounds_alignment(obs_sceneitem_t *item,
 	if (item) {
 		item->bounds_align = alignment;
 		update_item_transform(item);
+		resize_parent_group(item, true);
 	}
 }
 
@@ -1731,6 +1741,7 @@ void obs_sceneitem_set_bounds(obs_sceneitem_t *item, const struct vec2 *bounds)
 	if (item) {
 		item->bounds = *bounds;
 		update_item_transform(item);
+		resize_parent_group(item, true);
 	}
 }
 
@@ -1798,6 +1809,7 @@ void obs_sceneitem_set_info(obs_sceneitem_t *item,
 		item->bounds_align = info->bounds_alignment;
 		item->bounds       = info->bounds;
 		update_item_transform(item);
+		resize_parent_group(item, true);
 	}
 }
 
@@ -2011,6 +2023,7 @@ void obs_sceneitem_set_crop(obs_sceneitem_t *item,
 	obs_leave_graphics();
 
 	update_item_transform(item);
+	resize_parent_group(item, true);
 }
 
 void obs_sceneitem_get_crop(const obs_sceneitem_t *item,
@@ -2045,6 +2058,7 @@ void obs_sceneitem_set_scale_filter(obs_sceneitem_t *item,
 	obs_leave_graphics();
 
 	update_item_transform(item);
+	resize_parent_group(item, true);
 }
 
 enum obs_scale_type obs_sceneitem_get_scale_filter(
@@ -2067,8 +2081,10 @@ void obs_sceneitem_defer_update_end(obs_sceneitem_t *item)
 	if (!obs_ptr_valid(item, "obs_sceneitem_defer_update_end"))
 		return;
 
-	if (os_atomic_dec_long(&item->defer_update) == 0)
+	if (os_atomic_dec_long(&item->defer_update) == 0) {
 		update_item_transform(item);
+		resize_parent_group(item, true);
+	}
 }
 
 int64_t obs_sceneitem_get_id(const obs_sceneitem_t *item)
@@ -2156,7 +2172,7 @@ static void apply_group_transform(obs_sceneitem_t *item, obs_sceneitem_t *group)
 }
 
 /* assumes group scene and parent scene is locked */
-static void reposition_group(obs_sceneitem_t *group)
+static void resize_group(obs_sceneitem_t *group)
 {
 	obs_scene_t *scene = group->source->context.data;
 	struct vec2 minv;
@@ -2229,6 +2245,26 @@ static void reposition_group(obs_sceneitem_t *group)
 	update_item_transform(group);
 }
 
+static inline void resize_parent_group(obs_sceneitem_t *item, bool lock)
+{
+	if (os_atomic_load_long(&item->defer_update) > 0)
+		return;
+
+	obs_scene_t *parent = item->parent;
+	obs_scene_addref(parent);
+	if (parent->group_sceneitem) {
+		obs_sceneitem_t *group = parent->group_sceneitem;
+		obs_sceneitem_addref(group);
+		if (lock)
+			full_lock(parent);
+		resize_group(group);
+		if (lock)
+			full_unlock(parent);
+		obs_sceneitem_release(group);
+	}
+	obs_scene_release(parent);
+}
+
 obs_sceneitem_t *obs_scene_insert_group(obs_scene_t *scene,
 		const char *name, obs_sceneitem_t **items, size_t count)
 {
@@ -2273,7 +2309,7 @@ obs_sceneitem_t *obs_scene_insert_group(obs_scene_t *scene,
 		apply_group_transform(items[idx], item);
 	}
 	items[0]->prev = NULL;
-	reposition_group(item);
+	resize_group(item);
 	full_unlock(sub_scene);
 	full_unlock(scene);
 
@@ -2308,6 +2344,11 @@ obs_sceneitem_t *obs_scene_get_group(obs_scene_t *scene, const char *name)
 	full_unlock(scene);
 
 	return group;
+}
+
+obs_sceneitem_t *obs_sceneitem_group_from_scene(obs_scene_t *scene)
+{
+	return scene ? scene->group_sceneitem : NULL;
 }
 
 bool obs_sceneitem_is_group(obs_sceneitem_t *item)
@@ -2403,7 +2444,7 @@ void obs_sceneitem_group_add_item(obs_sceneitem_t *group, obs_sceneitem_t *item)
 	item->parent = groupscene;
 	item->next = NULL;
 	apply_group_transform(item, group);
-	reposition_group(group);
+	resize_group(group);
 	full_unlock(groupscene);
 
 	/* ------------------------- */
@@ -2445,7 +2486,7 @@ void obs_sceneitem_group_remove_item(obs_sceneitem_t *item)
 
 	/* ------------------------- */
 
-	reposition_group(groupitem);
+	resize_group(groupitem);
 	full_unlock(groupscene);
 	full_unlock(scene);
 }
@@ -2585,7 +2626,7 @@ bool obs_scene_reorder_items2(obs_scene_t *scene,
 				sub_prev = sub_item;
 			}
 
-			reposition_group(info->item);
+			resize_group(info->item);
 			full_unlock(sub_scene);
 			obs_scene_release(sub_scene);
 		}

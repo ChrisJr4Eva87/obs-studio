@@ -39,6 +39,8 @@ struct SceneFindData {
 	OBSSceneItem item;
 	bool         selectBelow;
 
+	obs_sceneitem_t *group = nullptr;
+
 	SceneFindData(const SceneFindData &) = delete;
 	SceneFindData(SceneFindData &&) = delete;
 	SceneFindData& operator=(const SceneFindData &) = delete;
@@ -214,10 +216,25 @@ static bool CheckItemSelected(obs_scene_t *scene, obs_sceneitem_t *item,
 
 	if (!SceneItemHasVideo(item))
 		return true;
+	if (obs_sceneitem_is_group(item)) {
+		data->group = item;
+		obs_sceneitem_group_enum_items(item, CheckItemSelected, param);
+		data->group = nullptr;
+
+		if (data->item) {
+			return false;
+		}
+	}
 
 	vec3_set(&pos3, data->pos.x, data->pos.y, 0.0f);
 
 	obs_sceneitem_get_box_transform(item, &transform);
+
+	if (data->group) {
+		matrix4 parent_transform;
+		obs_sceneitem_get_draw_transform(data->group, &parent_transform);
+		matrix4_mul(&transform, &transform, &parent_transform);
+	}
 
 	matrix4_inv(&transform, &transform);
 	vec3_transform(&transformedPos, &pos3, &transform);
@@ -482,6 +499,9 @@ static bool select_one(obs_scene_t *scene, obs_sceneitem_t *item, void *param)
 {
 	obs_sceneitem_t *selectedItem =
 		reinterpret_cast<obs_sceneitem_t*>(param);
+	if (obs_sceneitem_is_group(item))
+		obs_sceneitem_group_enum_items(item, select_one, param);
+
 	obs_sceneitem_select(item, (selectedItem == item));
 
 	UNUSED_PARAMETER(scene);
@@ -692,9 +712,22 @@ static bool move_items(obs_scene_t *scene, obs_sceneitem_t *item, void *param)
 	if (obs_sceneitem_locked(item))
 		return true;
 
+	bool selected = obs_sceneitem_selected(item);
 	vec2 *offset = reinterpret_cast<vec2*>(param);
 
-	if (obs_sceneitem_selected(item)) {
+	if (obs_sceneitem_is_group(item) && !selected) {
+		matrix4 transform;
+		vec3 new_offset;
+		vec3_set(&new_offset, offset->x, offset->y, 0.0f);
+
+		obs_sceneitem_get_draw_transform(item, &transform);
+		vec4_set(&transform.t, 0.0f, 0.0f, 0.0f, 1.0f);
+		matrix4_inv(&transform, &transform);
+		vec3_transform(&new_offset, &new_offset, &transform);
+		obs_sceneitem_group_enum_items(item, move_items, &new_offset);
+	}
+
+	if (selected) {
 		vec2 pos;
 		obs_sceneitem_get_pos(item, &pos);
 		vec2_add(&pos, &pos, offset);
