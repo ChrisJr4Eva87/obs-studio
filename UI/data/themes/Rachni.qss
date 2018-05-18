@@ -701,6 +701,27 @@ MuteCheckBox::indicator:unchecked:disabled {
 	image: url(./Dark/unmute.png);
 }
 
+/****************************/
+/* --- Group Checkboxes --- */
+/****************************/
+
+SourceTreeSubItemCheckBox {
+    outline: none;
+}
+
+SourceTreeSubItemCheckBox::indicator {
+    width: 10px;
+    height: 10px;
+}
+
+SourceTreeSubItemCheckBox::indicator:checked {
+    image: url(./Dark/expand.png);
+}
+
+SourceTreeSubItemCheckBox::indicator:unchecked {
+    image: url(./Dark/collapse.png);
+}
+
 /*************************/
 /* --- Progress bars --- */
 /*************************/
