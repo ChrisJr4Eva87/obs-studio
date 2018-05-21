@@ -20,7 +20,7 @@
 #include "graphics/math-defs.h"
 #include "obs-scene.h"
 
-static inline void resize_parent_group(obs_sceneitem_t *item, bool lock);
+static void resize_group(obs_sceneitem_t *group);
 
 /* NOTE: For proper mutex lock order (preventing mutual cross-locks), never
  * lock the graphics mutex inside either of the scene mutexes.
@@ -389,6 +389,8 @@ static void update_item_transform(struct obs_scene_item *item)
 	calldata_set_ptr(&params, "item", item);
 	signal_handler_signal(item->parent->source->context.signals,
 			"item_transform", &params);
+
+	os_atomic_set_bool(&item->update_transform, false);
 }
 
 static inline bool source_size_changed(struct obs_scene_item *item)
@@ -524,6 +526,48 @@ static void scene_video_tick(void *data, float seconds)
 	UNUSED_PARAMETER(seconds);
 }
 
+/* assumes video lock */
+static void update_transforms_and_prune_sources(obs_scene_t *scene,
+		struct darray *remove_items)
+{
+	struct obs_scene_item *item = scene->first_item;
+	bool rebuild_group = false;
+
+	while (item) {
+		if (obs_source_removed(item->source)) {
+			struct obs_scene_item *del_item = item;
+			item = item->next;
+
+			remove_without_release(del_item);
+			darray_push_back(sizeof(struct obs_scene_item*),
+					remove_items, &del_item);
+			rebuild_group = true;
+			continue;
+		}
+
+		if (item->is_group) {
+			obs_scene_t *group_scene = item->source->context.data;
+
+			video_lock(group_scene);
+			update_transforms_and_prune_sources(group_scene,
+					remove_items);
+			video_unlock(group_scene);
+		}
+
+		if (os_atomic_load_bool(&item->update_transform) ||
+		    source_size_changed(item)) {
+
+			update_item_transform(item);
+			rebuild_group = true;
+		}
+
+		item = item->next;
+	}
+
+	if (rebuild_group && scene->group_sceneitem)
+		resize_group(scene->group_sceneitem);
+}
+
 static void scene_video_render(void *data, gs_effect_t *effect)
 {
 	DARRAY(struct obs_scene_item*) remove_items;
@@ -533,26 +577,16 @@ static void scene_video_render(void *data, gs_effect_t *effect)
 	da_init(remove_items);
 
 	video_lock(scene);
-	item = scene->first_item;
+
+	if (!scene->group_sceneitem) {
+		update_transforms_and_prune_sources(scene, &remove_items.da);
+	}
 
 	gs_blend_state_push();
 	gs_reset_blend_state();
 
+	item = scene->first_item;
 	while (item) {
-		if (obs_source_removed(item->source)) {
-			struct obs_scene_item *del_item = item;
-			item = item->next;
-
-			remove_without_release(del_item);
-			da_push_back(remove_items, &del_item);
-			continue;
-		}
-
-		if (source_size_changed(item)) {
-			update_item_transform(item);
-			resize_parent_group(item, false);
-		}
-
 		if (item->user_visible)
 			render_item(item);
 
@@ -1594,8 +1628,7 @@ void obs_sceneitem_set_pos(obs_sceneitem_t *item, const struct vec2 *pos)
 {
 	if (item) {
 		vec2_copy(&item->pos, pos);
-		update_item_transform(item);
-		resize_parent_group(item, true);
+		os_atomic_set_bool(&item->update_transform, true);
 	}
 }
 
@@ -1603,8 +1636,7 @@ void obs_sceneitem_set_rot(obs_sceneitem_t *item, float rot)
 {
 	if (item) {
 		item->rot = rot;
-		update_item_transform(item);
-		resize_parent_group(item, true);
+		os_atomic_set_bool(&item->update_transform, true);
 	}
 }
 
@@ -1612,8 +1644,7 @@ void obs_sceneitem_set_scale(obs_sceneitem_t *item, const struct vec2 *scale)
 {
 	if (item) {
 		vec2_copy(&item->scale, scale);
-		update_item_transform(item);
-		resize_parent_group(item, true);
+		os_atomic_set_bool(&item->update_transform, true);
 	}
 }
 
@@ -1621,8 +1652,7 @@ void obs_sceneitem_set_alignment(obs_sceneitem_t *item, uint32_t alignment)
 {
 	if (item) {
 		item->align = alignment;
-		update_item_transform(item);
-		resize_parent_group(item, true);
+		os_atomic_set_bool(&item->update_transform, true);
 	}
 }
 
@@ -1721,8 +1751,7 @@ void obs_sceneitem_set_bounds_type(obs_sceneitem_t *item,
 {
 	if (item) {
 		item->bounds_type = type;
-		update_item_transform(item);
-		resize_parent_group(item, true);
+		os_atomic_set_bool(&item->update_transform, true);
 	}
 }
 
@@ -1731,8 +1760,7 @@ void obs_sceneitem_set_bounds_alignment(obs_sceneitem_t *item,
 {
 	if (item) {
 		item->bounds_align = alignment;
-		update_item_transform(item);
-		resize_parent_group(item, true);
+		os_atomic_set_bool(&item->update_transform, true);
 	}
 }
 
@@ -1740,8 +1768,7 @@ void obs_sceneitem_set_bounds(obs_sceneitem_t *item, const struct vec2 *bounds)
 {
 	if (item) {
 		item->bounds = *bounds;
-		update_item_transform(item);
-		resize_parent_group(item, true);
+		os_atomic_set_bool(&item->update_transform, true);
 	}
 }
 
@@ -1808,8 +1835,7 @@ void obs_sceneitem_set_info(obs_sceneitem_t *item,
 		item->bounds_type  = info->bounds_type;
 		item->bounds_align = info->bounds_alignment;
 		item->bounds       = info->bounds;
-		update_item_transform(item);
-		resize_parent_group(item, true);
+		os_atomic_set_bool(&item->update_transform, true);
 	}
 }
 
@@ -2022,8 +2048,7 @@ void obs_sceneitem_set_crop(obs_sceneitem_t *item,
 	if (item->crop.bottom < 0) item->crop.bottom = 0;
 	obs_leave_graphics();
 
-	update_item_transform(item);
-	resize_parent_group(item, true);
+	os_atomic_set_bool(&item->update_transform, true);
 }
 
 void obs_sceneitem_get_crop(const obs_sceneitem_t *item,
@@ -2057,8 +2082,7 @@ void obs_sceneitem_set_scale_filter(obs_sceneitem_t *item,
 
 	obs_leave_graphics();
 
-	update_item_transform(item);
-	resize_parent_group(item, true);
+	os_atomic_set_bool(&item->update_transform, true);
 }
 
 enum obs_scale_type obs_sceneitem_get_scale_filter(
@@ -2081,10 +2105,8 @@ void obs_sceneitem_defer_update_end(obs_sceneitem_t *item)
 	if (!obs_ptr_valid(item, "obs_sceneitem_defer_update_end"))
 		return;
 
-	if (os_atomic_dec_long(&item->defer_update) == 0) {
-		update_item_transform(item);
-		resize_parent_group(item, true);
-	}
+	if (os_atomic_dec_long(&item->defer_update) == 0)
+		os_atomic_set_bool(&item->update_transform, true);
 }
 
 int64_t obs_sceneitem_get_id(const obs_sceneitem_t *item)
@@ -2243,26 +2265,6 @@ static void resize_group(obs_sceneitem_t *group)
 	}
 
 	update_item_transform(group);
-}
-
-static inline void resize_parent_group(obs_sceneitem_t *item, bool lock)
-{
-	if (os_atomic_load_long(&item->defer_update) > 0)
-		return;
-
-	obs_scene_t *parent = item->parent;
-	obs_scene_addref(parent);
-	if (parent->group_sceneitem) {
-		obs_sceneitem_t *group = parent->group_sceneitem;
-		obs_sceneitem_addref(group);
-		if (lock)
-			full_lock(parent);
-		resize_group(group);
-		if (lock)
-			full_unlock(parent);
-		obs_sceneitem_release(group);
-	}
-	obs_scene_release(parent);
 }
 
 obs_sceneitem_t *obs_scene_insert_group(obs_scene_t *scene,

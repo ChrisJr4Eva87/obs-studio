@@ -33,6 +33,7 @@ struct obs_scene_item {
 	volatile bool         removed;
 
 	bool                  is_group;
+	bool                  update_transform;
 
 	int64_t               id;
 
