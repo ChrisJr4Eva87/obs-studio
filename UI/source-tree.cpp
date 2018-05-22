@@ -441,6 +441,15 @@ void SourceTreeModel::SceneChanged()
 
 	UpdateGroupState(false);
 	st->ResetWidgets();
+
+	for (int i = 0; i < items.count(); i++) {
+		bool select = obs_sceneitem_selected(items[i]);
+		QModelIndex index = createIndex(i, 0);
+
+		st->selectionModel()->select(index, select
+				? QItemSelectionModel::Select
+				: QItemSelectionModel::Deselect);
+	}
 }
 
 /* reorders list optimally with model reorder funcs */
@@ -449,14 +458,6 @@ void SourceTreeModel::ReorderItems()
 	OBSScene scene = GetCurrentScene();
 
 	QVector<OBSSceneItem> newitems;
-	auto enumItem = [] (obs_scene_t*, obs_sceneitem_t *item, void *ptr)
-	{
-		QVector<OBSSceneItem> &newitems =
-			*reinterpret_cast<QVector<OBSSceneItem>*>(ptr);
-		newitems.insert(0, item);
-		return true;
-	};
-
 	obs_scene_enum_items(scene, enumItem, &newitems);
 
 	/* if item list has changed size, do full reset */
@@ -628,6 +629,9 @@ Qt::DropActions SourceTreeModel::supportedDropActions() const
 
 void SourceTreeModel::GroupSelectedItems(QModelIndexList &indices)
 {
+	if (indices.count() == 0)
+		return;
+
 	OBSScene scene = GetCurrentScene();
 	QString name;
 
@@ -645,6 +649,7 @@ void SourceTreeModel::GroupSelectedItems(QModelIndexList &indices)
 	for (int i = indices.count() - 1; i >= 0; i--) {
 		obs_sceneitem_t *item = items[indices[i].row()];
 		item_order << item;
+		obs_sceneitem_select(item, false);
 	}
 
 	obs_sceneitem_t *item = obs_scene_insert_group(
@@ -670,6 +675,8 @@ void SourceTreeModel::GroupSelectedItems(QModelIndexList &indices)
 
 	hasGroups = true;
 	st->UpdateWidgets(true);
+
+	obs_sceneitem_select(item, true);
 }
 
 void SourceTreeModel::ExpandGroup(obs_sceneitem_t *item)
