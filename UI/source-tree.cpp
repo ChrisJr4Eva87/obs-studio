@@ -649,12 +649,17 @@ void SourceTreeModel::GroupSelectedItems(QModelIndexList &indices)
 	for (int i = indices.count() - 1; i >= 0; i--) {
 		obs_sceneitem_t *item = items[indices[i].row()];
 		item_order << item;
-		obs_sceneitem_select(item, false);
 	}
 
 	obs_sceneitem_t *item = obs_scene_insert_group(
 			scene, QT_TO_UTF8(name),
 			item_order.data(), item_order.size());
+	if (!item) {
+		return;
+	}
+
+	for (obs_sceneitem_t *item : item_order)
+		obs_sceneitem_select(item, false);
 
 	int newIdx = indices[0].row();
 
@@ -1126,8 +1131,11 @@ bool SourceTree::MultipleBaseSelected() const
 
 	for (auto &idx : selectedIndices) {
 		obs_sceneitem_t *item = stm->items[idx.row()];
-		obs_scene *itemScene = obs_sceneitem_get_scene(item);
+		if (obs_sceneitem_is_group(item)) {
+			return false;
+		}
 
+		obs_scene *itemScene = obs_sceneitem_get_scene(item);
 		if (itemScene != scene) {
 			return false;
 		}

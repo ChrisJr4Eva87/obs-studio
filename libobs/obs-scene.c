@@ -2279,6 +2279,13 @@ obs_sceneitem_t *obs_scene_insert_group(obs_scene_t *scene,
 	if (!scene)
 		return NULL;
 
+	/* don't allow groups or sub-items of other groups */
+	for (size_t i = count; i > 0; i--) {
+		obs_sceneitem_t *item = items[i - 1];
+		if (item->parent != scene || item->is_group)
+			return NULL;
+	}
+
 	obs_scene_t *sub_scene = obs_scene_create_private(name);
 	obs_sceneitem_t *last_item = items ? items[count - 1] : NULL;
 
