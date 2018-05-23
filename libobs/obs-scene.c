@@ -1716,9 +1716,9 @@ void obs_sceneitem_set_order(obs_sceneitem_t *item,
 		attach_sceneitem(scene, item, NULL);
 	}
 
-	signal_reorder(item);
-
 	full_unlock(scene);
+
+	signal_reorder(item);
 	obs_scene_release(scene);
 }
 
@@ -1748,9 +1748,9 @@ void obs_sceneitem_set_order_position(obs_sceneitem_t *item,
 		attach_sceneitem(scene, item, next);
 	}
 
-	signal_reorder(item);
-
 	full_unlock(scene);
+
+	signal_reorder(item);
 	obs_scene_release(scene);
 }
 
@@ -1992,9 +1992,9 @@ bool obs_scene_reorder_items(obs_scene_t *scene,
 		prev = item_order[i];
 	}
 
-	signal_reorder(scene->first_item);
-
 	full_unlock(scene);
+
+	signal_reorder(scene->first_item);
 	obs_scene_release(scene);
 	return true;
 }
@@ -2656,9 +2656,9 @@ bool obs_scene_reorder_items2(obs_scene_t *scene,
 		prev = item;
 	}
 
-	signal_reorder(scene->first_item);
-
 	full_unlock(scene);
+
+	signal_reorder(scene->first_item);
 	obs_scene_release(scene);
 	return true;
 }
