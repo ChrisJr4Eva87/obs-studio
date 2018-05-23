@@ -835,10 +835,16 @@ void SourceTree::dropEvent(QDropEvent *event)
 
 	DropIndicatorPosition indicator = dropIndicatorPosition();
 	int row = indexAt(event->pos()).row();
+	bool emptyDrop = row == -1;
 
-	if (row == -1) {
-		QListView::dropEvent(event);
-		return;
+	if (emptyDrop) {
+		if (!items.size()) {
+			QListView::dropEvent(event);
+			return;
+		}
+
+		row = items.size() - 1;
+		indicator = QAbstractItemView::BelowItem;
 	}
 
 	/* --------------------------------------- */
@@ -854,6 +860,8 @@ void SourceTree::dropEvent(QDropEvent *event)
 
 	/* not a group if moving above the group */
 	if (indicator == QAbstractItemView::AboveItem && itemIsGroup)
+		dropGroup = nullptr;
+	if (emptyDrop)
 		dropGroup = nullptr;
 
 	/* --------------------------------------- */
