@@ -1456,6 +1456,9 @@ EXPORT void obs_sceneitem_group_enum_items(obs_sceneitem_t *group,
 		bool (*callback)(obs_scene_t*, obs_sceneitem_t*, void*),
 		void *param);
 
+EXPORT void obs_sceneitem_defer_group_resize_begin(obs_sceneitem_t *item);
+EXPORT void obs_sceneitem_defer_group_resize_end(obs_sceneitem_t *item);
+
 
 /* ------------------------------------------------------------------------- */
 /* Outputs */

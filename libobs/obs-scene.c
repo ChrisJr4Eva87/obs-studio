@@ -524,8 +524,10 @@ static void scene_video_tick(void *data, float seconds)
 static void update_transforms_and_prune_sources(obs_scene_t *scene,
 		struct darray *remove_items)
 {
+	obs_sceneitem_t *group_sceneitem = scene->group_sceneitem;
 	struct obs_scene_item *item = scene->first_item;
-	bool rebuild_group = false;
+	bool rebuild_group = group_sceneitem &&
+		os_atomic_load_bool(&group_sceneitem->update_group_resize);
 
 	while (item) {
 		if (obs_source_removed(item->source)) {
@@ -2115,6 +2117,23 @@ void obs_sceneitem_defer_update_end(obs_sceneitem_t *item)
 		os_atomic_set_bool(&item->update_transform, true);
 }
 
+void obs_sceneitem_defer_group_resize_begin(obs_sceneitem_t *item)
+{
+	if (!obs_ptr_valid(item, "obs_sceneitem_defer_group_resize_begin"))
+		return;
+
+	os_atomic_inc_long(&item->defer_group_resize);
+}
+
+void obs_sceneitem_defer_group_resize_end(obs_sceneitem_t *item)
+{
+	if (!obs_ptr_valid(item, "obs_sceneitem_defer_group_resize_end"))
+		return;
+
+	if (os_atomic_dec_long(&item->defer_group_resize) == 0)
+		os_atomic_set_bool(&item->update_group_resize, true);
+}
+
 int64_t obs_sceneitem_get_id(const obs_sceneitem_t *item)
 {
 	if (!obs_ptr_valid(item, "obs_sceneitem_get_id"))
@@ -2207,6 +2226,9 @@ static void resize_group(obs_sceneitem_t *group)
 	struct vec2 maxv;
 	struct vec2 scale;
 
+	if (os_atomic_load_long(&group->defer_group_resize) > 0)
+		return;
+
 	vec2_set(&minv, M_INFINITE, M_INFINITE);
 	vec2_set(&maxv, -M_INFINITE, -M_INFINITE);
 
@@ -2269,6 +2291,8 @@ static void resize_group(obs_sceneitem_t *group)
 		transform_val(&new_pos, &group->draw_transform);
 		vec2_copy(&group->pos, &new_pos);
 	}
+
+	os_atomic_set_bool(&group->update_group_resize, false);
 
 	update_item_transform(group);
 }

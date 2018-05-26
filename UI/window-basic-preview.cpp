@@ -285,10 +285,35 @@ struct HandleFindData {
 static bool FindHandleAtPos(obs_scene_t *scene, obs_sceneitem_t *item,
 		void *param)
 {
-	if (!obs_sceneitem_selected(item))
-		return true;
-
 	HandleFindData *data = reinterpret_cast<HandleFindData*>(param);
+
+	if (!obs_sceneitem_selected(item)) {
+		if (obs_sceneitem_is_group(item)) {
+			matrix4 transform;
+			vec3 new_pos3;
+			vec3_set(&new_pos3, data->pos.x, data->pos.y, 0.0f);
+			vec3_divf(&new_pos3, &new_pos3, data->scale);
+
+			obs_sceneitem_get_draw_transform(item, &transform);
+			matrix4_inv(&transform, &transform);
+			vec3_transform(&new_pos3, &new_pos3, &transform);
+
+			vec2 new_pos;
+			vec2_set(&new_pos, new_pos3.x, new_pos3.y);
+			HandleFindData findData(new_pos, 1.0f);
+			findData.item = data->item;
+			findData.handle = data->handle;
+
+			obs_sceneitem_group_enum_items(item, FindHandleAtPos,
+					&findData);
+
+			data->item = findData.item;
+			data->handle = findData.handle;
+		}
+
+		return true;
+	}
+
 	matrix4        transform;
 	vec3           pos3;
 	float          closestHandle = HANDLE_SEL_RADIUS;
@@ -394,6 +419,15 @@ void OBSBasicPreview::GetStretchHandleData(const vec2 &pos)
 				startCrop.left - startCrop.right);
 		cropSize.y = float(obs_source_get_height(source) -
 				startCrop.top - startCrop.bottom);
+
+		stretchGroup = obs_sceneitem_get_group(stretchItem);
+		if (stretchGroup) {
+			obs_sceneitem_get_draw_transform(stretchGroup,
+					&invGroupTransform);
+			matrix4_inv(&invGroupTransform,
+					&invGroupTransform);
+			obs_sceneitem_defer_group_resize_begin(stretchGroup);
+		}
 	}
 }
 
@@ -554,10 +588,15 @@ void OBSBasicPreview::mouseReleaseEvent(QMouseEvent *event)
 		if (!mouseMoved)
 			ProcessClick(pos);
 
-		stretchItem = nullptr;
-		mouseDown   = false;
-		mouseMoved  = false;
-		cropping    = false;
+		if (stretchGroup) {
+			obs_sceneitem_defer_group_resize_end(stretchGroup);
+		}
+
+		stretchItem  = nullptr;
+		stretchGroup = nullptr;
+		mouseDown    = false;
+		mouseMoved   = false;
+		cropping     = false;
 	}
 }
 
@@ -1096,6 +1135,17 @@ void OBSBasicPreview::mouseMoveEvent(QMouseEvent *event)
 		pos.y = std::round(pos.y);
 
 		if (stretchHandle != ItemHandle::None) {
+			obs_sceneitem_t *group = obs_sceneitem_get_group(
+					stretchItem);
+			if (group) {
+				vec3 group_pos;
+				vec3_set(&group_pos, pos.x, pos.y, 0.0f);
+				vec3_transform(&group_pos, &group_pos,
+						&invGroupTransform);
+				pos.x = group_pos.x;
+				pos.y = group_pos.y;
+			}
+
 			if (cropping)
 				CropItem(pos);
 			else
