@@ -96,6 +96,7 @@ class SourceTreeModel : public QAbstractListModel {
 	OBSSceneItem Get(int idx);
 
 	void GroupSelectedItems(QModelIndexList &indices);
+	void UngroupSelectedGroups(QModelIndexList &indices);
 
 	void ExpandGroup(obs_sceneitem_t *item);
 	void CollapseGroup(obs_sceneitem_t *item);
@@ -152,10 +153,12 @@ public:
 	void Edit(int idx);
 
 	bool MultipleBaseSelected() const;
+	bool GroupsSelected() const;
 	bool GroupedItemsSelected() const;
 
 public slots:
 	void GroupSelectedItems();
+	void UngroupSelectedGroups();
 
 protected:
 	virtual void mouseDoubleClickEvent(QMouseEvent *event) override;

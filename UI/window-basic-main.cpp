@@ -3844,6 +3844,11 @@ void OBSBasic::CreateSourcePopupMenu(int idx, bool preview)
 		popup.addSeparator();
 		popup.addAction(QTStr("Basic.Main.GroupItems"),
 				ui->sources, SLOT(GroupSelectedItems()));
+
+	} else if (ui->sources->GroupsSelected()) {
+		popup.addSeparator();
+		popup.addAction(QTStr("Basic.Main.Ungroup"),
+				ui->sources, SLOT(UngroupSelectedGroups()));
 	}
 
 	popup.addSeparator();

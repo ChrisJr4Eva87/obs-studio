@@ -684,6 +684,19 @@ void SourceTreeModel::GroupSelectedItems(QModelIndexList &indices)
 	obs_sceneitem_select(item, true);
 }
 
+void SourceTreeModel::UngroupSelectedGroups(QModelIndexList &indices)
+{
+	if (indices.count() == 0)
+		return;
+
+	for (int i = indices.count() - 1; i >= 0; i--) {
+		obs_sceneitem_t *item = items[indices[i].row()];
+		obs_sceneitem_group_ungroup(item);
+	}
+
+	SceneChanged();
+}
+
 void SourceTreeModel::ExpandGroup(obs_sceneitem_t *item)
 {
 	int itemIdx = items.indexOf(item);
@@ -1152,6 +1165,27 @@ bool SourceTree::MultipleBaseSelected() const
 	return true;
 }
 
+bool SourceTree::GroupsSelected() const
+{
+	SourceTreeModel *stm = GetStm();
+	QModelIndexList selectedIndices = selectedIndexes();
+
+	OBSScene scene = GetCurrentScene();
+
+	if (selectedIndices.size() < 1) {
+		return false;
+	}
+
+	for (auto &idx : selectedIndices) {
+		obs_sceneitem_t *item = stm->items[idx.row()];
+		if (!obs_sceneitem_is_group(item)) {
+			return false;
+		}
+	}
+
+	return true;
+}
+
 bool SourceTree::GroupedItemsSelected() const
 {
 	SourceTreeModel *stm = GetStm();
@@ -1179,4 +1213,10 @@ void SourceTree::GroupSelectedItems()
 	QModelIndexList indices = selectedIndexes();
 	std::sort(indices.begin(), indices.end());
 	GetStm()->GroupSelectedItems(indices);
+}
+
+void SourceTree::UngroupSelectedGroups()
+{
+	QModelIndexList indices = selectedIndexes();
+	GetStm()->UngroupSelectedGroups(indices);
 }
