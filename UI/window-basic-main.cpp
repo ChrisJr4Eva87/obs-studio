@@ -6033,12 +6033,13 @@ bool OBSBasic::sysTrayMinimizeToTray()
 
 void OBSBasic::on_actionCopySource_triggered()
 {
-	on_actionCopyTransform_triggered();
-
 	OBSSceneItem item = GetCurrentSceneItem();
-
 	if (!item)
 		return;
+	if (!!obs_sceneitem_is_group(item))
+		return;
+
+	on_actionCopyTransform_triggered();
 
 	OBSSource source = obs_sceneitem_get_source(item);
 
