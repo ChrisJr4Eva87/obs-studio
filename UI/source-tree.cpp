@@ -1146,7 +1146,7 @@ bool SourceTree::MultipleBaseSelected() const
 
 	OBSScene scene = GetCurrentScene();
 
-	if (selectedIndices.size() < 2) {
+	if (selectedIndices.size() < 1) {
 		return false;
 	}
 
