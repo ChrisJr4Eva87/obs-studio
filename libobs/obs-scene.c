@@ -325,6 +325,9 @@ static void update_item_transform(struct obs_scene_item *item)
 	if (os_atomic_load_long(&item->defer_update) > 0)
 		return;
 
+	item->last_width  = width;
+	item->last_height = height;
+
 	width = cx;
 	height = cy;
 
@@ -376,9 +379,6 @@ static void update_item_transform(struct obs_scene_item *item)
 			item->pos.x, item->pos.y, 0.0f);
 
 	/* ----------------------- */
-
-	item->last_width  = width;
-	item->last_height = height;
 
 	calldata_init_fixed(&params, stack, sizeof(stack));
 	calldata_set_ptr(&params, "item", item);
