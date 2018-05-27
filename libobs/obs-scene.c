@@ -1423,7 +1423,8 @@ static inline bool source_has_audio(obs_source_t *source)
 }
 
 static obs_sceneitem_t *obs_scene_add_internal(obs_scene_t *scene,
-		obs_source_t *source, obs_sceneitem_t *insert_after)
+		obs_source_t *source, obs_sceneitem_t *insert_after,
+		bool is_group)
 {
 	struct obs_scene_item *last;
 	struct obs_scene_item *item;
@@ -1463,6 +1464,7 @@ static obs_sceneitem_t *obs_scene_add_internal(obs_scene_t *scene,
 	item->actions_mutex = mutex;
 	item->user_visible = true;
 	item->locked = false;
+	item->is_group = is_group;
 	item->private_settings = obs_data_create();
 	os_atomic_set_long(&item->active_refs, 1);
 	vec2_set(&item->scale, 1.0f, 1.0f);
@@ -1515,7 +1517,8 @@ static obs_sceneitem_t *obs_scene_add_internal(obs_scene_t *scene,
 
 obs_sceneitem_t *obs_scene_add(obs_scene_t *scene, obs_source_t *source)
 {
-	obs_sceneitem_t *item = obs_scene_add_internal(scene, source, NULL);
+	obs_sceneitem_t *item = obs_scene_add_internal(scene, source, NULL,
+			false);
 	struct calldata params;
 	uint8_t stack[128];
 
@@ -2318,10 +2321,9 @@ obs_sceneitem_t *obs_scene_insert_group(obs_scene_t *scene,
 	obs_sceneitem_t *last_item = items ? items[count - 1] : NULL;
 
 	obs_sceneitem_t *item = obs_scene_add_internal(
-			scene, sub_scene->source, last_item);
+			scene, sub_scene->source, last_item, true);
 	sub_scene->group_sceneitem = item;
 	sub_scene->custom_size = true;
-	item->is_group = true;
 
 	obs_scene_release(sub_scene);
 
