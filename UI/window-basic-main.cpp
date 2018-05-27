@@ -4069,20 +4069,24 @@ void OBSBasic::on_actionAddSource_triggered()
 	AddSourcePopupMenu(QCursor::pos());
 }
 
+static bool remove_items(obs_scene_t *, obs_sceneitem_t *item, void *param)
+{
+	vector<OBSSceneItem> &items =
+		*reinterpret_cast<vector<OBSSceneItem>*>(param);
+
+	if (obs_sceneitem_selected(item)) {
+		items.emplace_back(item);
+	} else if (obs_sceneitem_is_group(item)) {
+		obs_sceneitem_group_enum_items(item, remove_items, &items);
+	}
+	return true;
+};
+
 void OBSBasic::on_actionRemoveSource_triggered()
 {
 	vector<OBSSceneItem> items;
 
-	auto func = [] (obs_scene_t *, obs_sceneitem_t *item, void *param)
-	{
-		vector<OBSSceneItem> &items =
-			*reinterpret_cast<vector<OBSSceneItem>*>(param);
-		if (obs_sceneitem_selected(item))
-			items.emplace_back(item);
-		return true;
-	};
-
-	obs_scene_enum_items(GetCurrentScene(), func, &items);
+	obs_scene_enum_items(GetCurrentScene(), remove_items, &items);
 
 	if (!items.size())
 		return;
