@@ -2396,6 +2396,12 @@ obs_sceneitem_t *obs_sceneitem_group_from_scene(obs_scene_t *scene)
 	return scene ? scene->group_sceneitem : NULL;
 }
 
+obs_sceneitem_t *obs_sceneitem_group_from_source(obs_source_t *source)
+{
+	obs_scene_t *scene = obs_scene_from_source(source);
+	return obs_sceneitem_group_from_scene(scene);
+}
+
 bool obs_sceneitem_is_group(obs_sceneitem_t *item)
 {
 	return item && item->is_group;

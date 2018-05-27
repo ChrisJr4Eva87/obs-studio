@@ -2610,7 +2610,8 @@ void OBSBasic::DeactivateAudioSource(OBSSource source)
 
 bool OBSBasic::QueryRemoveSource(obs_source_t *source)
 {
-	if (obs_source_get_type(source) == OBS_SOURCE_TYPE_SCENE) {
+	if (obs_source_get_type(source) == OBS_SOURCE_TYPE_SCENE &&
+	    !obs_sceneitem_group_from_source(source)) {
 		int count = ui->scenes->count();
 
 		if (count == 1) {
