@@ -94,6 +94,8 @@ class SourceTreeModel : public QAbstractListModel {
 	void Add(obs_sceneitem_t *item);
 	void Remove(obs_sceneitem_t *item);
 	OBSSceneItem Get(int idx);
+	QString GetNewGroupName();
+	void AddGroup();
 
 	void GroupSelectedItems(QModelIndexList &indices);
 	void UngroupSelectedGroups(QModelIndexList &indices);
@@ -147,6 +149,7 @@ public:
 	inline void Add(obs_sceneitem_t *item) {GetStm()->Add(item);}
 	inline void Remove(obs_sceneitem_t *item) {GetStm()->Remove(item);}
 	inline OBSSceneItem Get(int idx) {return GetStm()->Get(idx);}
+	inline QString GetNewGroupName() {return GetStm()->GetNewGroupName();}
 
 	void SelectItem(obs_sceneitem_t *sceneitem, bool select);
 
@@ -159,6 +162,7 @@ public:
 public slots:
 	void GroupSelectedItems();
 	void UngroupSelectedGroups();
+	void AddGroup();
 
 protected:
 	virtual void mouseDoubleClickEvent(QMouseEvent *event) override;

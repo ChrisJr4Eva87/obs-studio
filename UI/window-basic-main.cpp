@@ -4025,6 +4025,12 @@ QMenu *OBSBasic::CreateAddSourcePopupMenu()
 
 	addSource(popup, "scene", Str("Basic.Scene"));
 
+	popup->addSeparator();
+	QAction *addGroup = new QAction(QTStr("Group"), this);
+	connect(addGroup, SIGNAL(triggered(bool)),
+			ui->sources, SLOT(AddGroup()));
+	popup->addAction(addGroup);
+
 	if (!foundDeprecated) {
 		delete deprecated;
 		deprecated = nullptr;
@@ -4035,6 +4041,7 @@ QMenu *OBSBasic::CreateAddSourcePopupMenu()
 		popup = nullptr;
 
 	} else if (foundDeprecated) {
+		popup->addSeparator();
 		popup->addMenu(deprecated);
 	}
 

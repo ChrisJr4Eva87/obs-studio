@@ -2304,6 +2304,11 @@ static void resize_group(obs_sceneitem_t *group)
 	update_item_transform(group);
 }
 
+obs_sceneitem_t *obs_scene_add_group(obs_scene_t *scene, const char *name)
+{
+	return obs_scene_insert_group(scene, name, NULL, 0);
+}
+
 obs_sceneitem_t *obs_scene_insert_group(obs_scene_t *scene,
 		const char *name, obs_sceneitem_t **items, size_t count)
 {

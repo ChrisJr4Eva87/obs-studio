@@ -362,8 +362,7 @@ void SourceTreeItem::Update(bool force)
 				this, &SourceTreeItem::ExpandClicked);
 
 	} else {
-		int space = tree->GetStm()->hasGroups ? 10 : 3;
-		spacer = new QSpacerItem(space, 1);
+		spacer = new QSpacerItem(3, 1);
 		boxLayout->insertItem(0, spacer);
 	}
 }
@@ -627,11 +626,8 @@ Qt::DropActions SourceTreeModel::supportedDropActions() const
 	return QAbstractItemModel::supportedDropActions() | Qt::MoveAction;
 }
 
-void SourceTreeModel::GroupSelectedItems(QModelIndexList &indices)
+QString SourceTreeModel::GetNewGroupName()
 {
-	if (indices.count() == 0)
-		return;
-
 	OBSScene scene = GetCurrentScene();
 	QString name;
 
@@ -643,6 +639,33 @@ void SourceTreeModel::GroupSelectedItems(QModelIndexList &indices)
 		if (!group)
 			break;
 	}
+
+	return name;
+}
+
+void SourceTreeModel::AddGroup()
+{
+	QString name = GetNewGroupName();
+	obs_sceneitem_t *group = obs_scene_add_group(GetCurrentScene(),
+			QT_TO_UTF8(name));
+	if (!group)
+		return;
+
+	beginInsertRows(QModelIndex(), 0, 0);
+	items.insert(0, group);
+	endInsertRows();
+
+	st->UpdateWidget(createIndex(0, 0, nullptr), group);
+	UpdateGroupState(true);
+}
+
+void SourceTreeModel::GroupSelectedItems(QModelIndexList &indices)
+{
+	if (indices.count() == 0)
+		return;
+
+	OBSScene scene = GetCurrentScene();
+	QString name = GetNewGroupName();
 
 	QVector<obs_sceneitem_t *> item_order;
 
@@ -1219,4 +1242,9 @@ void SourceTree::UngroupSelectedGroups()
 {
 	QModelIndexList indices = selectedIndexes();
 	GetStm()->UngroupSelectedGroups(indices);
+}
+
+void SourceTree::AddGroup()
+{
+	GetStm()->AddGroup();
 }
