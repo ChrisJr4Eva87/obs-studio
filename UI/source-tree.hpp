@@ -153,8 +153,6 @@ public:
 
 	void SelectItem(obs_sceneitem_t *sceneitem, bool select);
 
-	void Edit(int idx);
-
 	bool MultipleBaseSelected() const;
 	bool GroupsSelected() const;
 	bool GroupedItemsSelected() const;
@@ -163,6 +161,7 @@ public slots:
 	void GroupSelectedItems();
 	void UngroupSelectedGroups();
 	void AddGroup();
+	void Edit(int idx);
 
 protected:
 	virtual void mouseDoubleClickEvent(QMouseEvent *event) override;

@@ -215,9 +215,15 @@ void SourceTreeItem::ExitEditMode(bool save)
 	}
 
 	/* ----------------------------------------- */
-	/* check for existing source                 */
+	/* Check for same name                       */
 
 	obs_source_t *source = obs_sceneitem_get_source(sceneitem);
+	if (newName == obs_source_get_name(source))
+		return;
+
+	/* ----------------------------------------- */
+	/* check for existing source                 */
+
 	bool exists = false;
 
 	if (obs_sceneitem_is_group(sceneitem)) {
@@ -657,6 +663,9 @@ void SourceTreeModel::AddGroup()
 
 	st->UpdateWidget(createIndex(0, 0, nullptr), group);
 	UpdateGroupState(true);
+
+	QMetaObject::invokeMethod(st, "Edit", Qt::QueuedConnection,
+			Q_ARG(int, 0));
 }
 
 void SourceTreeModel::GroupSelectedItems(QModelIndexList &indices)
@@ -705,6 +714,9 @@ void SourceTreeModel::GroupSelectedItems(QModelIndexList &indices)
 	st->UpdateWidgets(true);
 
 	obs_sceneitem_select(item, true);
+
+	QMetaObject::invokeMethod(st, "Edit", Qt::QueuedConnection,
+			Q_ARG(int, newIdx));
 }
 
 void SourceTreeModel::UngroupSelectedGroups(QModelIndexList &indices)
