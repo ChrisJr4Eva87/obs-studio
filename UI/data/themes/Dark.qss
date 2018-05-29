@@ -554,6 +554,7 @@ OBSHotkeyLabel[hotkeyPairHover=true] {
 /* Group Collapse Checkbox */
 
 SourceTreeSubItemCheckBox {
+    background: transparent;
     outline: none;
 }
 

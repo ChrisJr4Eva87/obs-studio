@@ -52,6 +52,7 @@ MuteCheckBox::indicator:unchecked {
 }
 
 SourceTreeSubItemCheckBox {
+    background: transparent;
     outline: none;
 }
 
