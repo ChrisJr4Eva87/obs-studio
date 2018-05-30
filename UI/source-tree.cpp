@@ -933,6 +933,17 @@ void SourceTree::dropEvent(QDropEvent *event)
 	}
 
 	/* --------------------------------------- */
+	/* if dropping a group, detect if it's     */
+	/* below another group                     */
+
+	obs_sceneitem_t *itemBelow = row == stm->items.count()
+		? nullptr
+		: stm->items[row];
+	if (!itemBelow || obs_sceneitem_get_group(itemBelow) != dropGroup) {
+		dropGroup = nullptr;
+	}
+
+	/* --------------------------------------- */
 	/* determine if any base group is selected */
 
 	bool hasGroups = false;
@@ -1078,6 +1089,9 @@ void SourceTree::dropEvent(QDropEvent *event)
 			obs_sceneitem_t *group;
 
 			if (obs_sceneitem_is_group(item)) {
+				if (lastGroup) {
+					insertLastGroup();
+				}
 				lastGroup = item;
 				continue;
 			}
