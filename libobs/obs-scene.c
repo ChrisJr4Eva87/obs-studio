@@ -23,6 +23,10 @@
 static void resize_group(obs_sceneitem_t *group);
 static void signal_parent(obs_scene_t *parent, const char *name,
 		calldata_t *params);
+static void get_ungrouped_transform(obs_sceneitem_t *group,
+		struct vec2 *pos,
+		struct vec2 *scale,
+		float *rot);
 
 /* NOTE: For proper mutex lock order (preventing mutual cross-locks), never
  * lock the graphics mutex inside either of the scene mutexes.
@@ -637,6 +641,9 @@ static void scene_load_item(struct obs_scene *scene, obs_data_t *item_data)
 	bool visible;
 	bool lock;
 
+	if (obs_data_get_bool(item_data, "group_item_backup"))
+		return;
+
 	is_group = obs_data_get_bool(item_data, "is_group");
 
 	if (is_group) {
@@ -772,18 +779,26 @@ static void scene_load(void *data, obs_data_t *settings)
 static void scene_save(void *data, obs_data_t *settings);
 
 static void scene_save_item(obs_data_array_t *array,
-		struct obs_scene_item *item)
+		struct obs_scene_item *item, bool group_item_backup)
 {
 	obs_data_t *item_data = obs_data_create();
 	const char *name     = obs_source_get_name(item->source);
 	const char *scale_filter;
+	struct vec2 pos = item->pos;
+	struct vec2 scale = item->scale;
+	float rot = item->rot;
+
+	if (group_item_backup) {
+		obs_sceneitem_t *group = item->parent->group_sceneitem;
+		get_ungrouped_transform(group, &pos, &scale, &rot);
+	}
 
 	obs_data_set_string(item_data, "name",         name);
 	obs_data_set_bool  (item_data, "visible",      item->user_visible);
 	obs_data_set_bool  (item_data, "locked",       item->locked);
-	obs_data_set_double(item_data, "rot",          item->rot);
-	obs_data_set_vec2 (item_data, "pos",          &item->pos);
-	obs_data_set_vec2 (item_data, "scale",        &item->scale);
+	obs_data_set_double(item_data, "rot",          rot);
+	obs_data_set_vec2  (item_data, "pos",          &pos);
+	obs_data_set_vec2  (item_data, "scale",        &scale);
 	obs_data_set_int   (item_data, "align",        (int)item->align);
 	obs_data_set_int   (item_data, "bounds_type",  (int)item->bounds_type);
 	obs_data_set_int   (item_data, "bounds_align", (int)item->bounds_align);
@@ -794,10 +809,28 @@ static void scene_save_item(obs_data_array_t *array,
 	obs_data_set_int  (item_data, "crop_bottom",  (int)item->crop.bottom);
 	obs_data_set_int  (item_data, "id",           item->id);
 	obs_data_set_bool (item_data, "is_group",     item->is_group);
+	obs_data_set_bool (item_data, "group_item_backup", group_item_backup);
 
 	if (item->is_group) {
 		obs_data_t *group_data = obs_data_create();
-		scene_save(item->source->context.data, group_data);
+		obs_scene_t *group_scene = item->source->context.data;
+		obs_sceneitem_t *group_item;
+
+		scene_save(group_scene, group_data);
+
+		/* save group items as part of main scene, but ignored.
+		 * causes an automatic ungroup if scene collection file
+		 * is loaded in previous versions. */
+		full_lock(group_scene);
+
+		group_item = group_scene->first_item;
+		while (group_item) {
+			scene_save_item(array, group_item, true);
+			group_item = group_item->next;
+		}
+
+		full_unlock(group_scene);
+
 		obs_data_set_obj(item_data, "group_source", group_data);
 		obs_data_release(group_data);
 	}
@@ -832,7 +865,7 @@ static void scene_save(void *data, obs_data_t *settings)
 
 	item = scene->first_item;
 	while (item) {
-		scene_save_item(array, item);
+		scene_save_item(array, item, false);
 		item = item->next;
 	}
 
@@ -2167,14 +2200,11 @@ static inline transform_val(struct vec2 *v2, struct matrix4 *transform)
 	v2->y = v.y;
 }
 
-static void remove_group_transform(obs_sceneitem_t *item)
+static void get_ungrouped_transform(obs_sceneitem_t *group,
+		struct vec2 *pos,
+		struct vec2 *scale,
+		float *rot)
 {
-	obs_scene_t *parent = item->parent;
-	if (!parent || !parent->group_sceneitem)
-		return;
-
-	obs_sceneitem_t *group = parent->group_sceneitem;
-
 	struct matrix4 transform;
 	struct matrix4 mat;
 	struct vec4 x_base;
@@ -2183,18 +2213,28 @@ static void remove_group_transform(obs_sceneitem_t *item)
 
 	matrix4_copy(&transform, &group->draw_transform);
 
-	transform_val(&item->pos, &transform);
+	transform_val(pos, &transform);
 	vec4_set(&transform.t, 0.0f, 0.0f, 0.0f, 1.0f);
 
-	vec4_set(&mat.x, item->scale.x, 0.0f, 0.0f, 0.0f);
-	vec4_set(&mat.y, 0.0f, item->scale.y, 0.0f, 0.0f);
+	vec4_set(&mat.x, scale->x, 0.0f, 0.0f, 0.0f);
+	vec4_set(&mat.y, 0.0f, scale->y, 0.0f, 0.0f);
 	vec4_set(&mat.z, 0.0f, 0.0f, 1.0f, 0.0f);
 	vec4_set(&mat.t, 0.0f, 0.0f, 0.0f, 1.0f);
 	matrix4_mul(&mat, &mat, &transform);
 
-	item->scale.x = vec4_len(&mat.x);
-	item->scale.y = vec4_len(&mat.y);
-	item->rot += group->rot;
+	scale->x = vec4_len(&mat.x);
+	scale->y = vec4_len(&mat.y);
+	*rot += group->rot;
+}
+
+static void remove_group_transform(obs_sceneitem_t *item)
+{
+	obs_scene_t *parent = item->parent;
+	if (!parent || !parent->group_sceneitem)
+		return;
+
+	obs_sceneitem_t *group = parent->group_sceneitem;
+	get_ungrouped_transform(group, &item->pos, &item->scale, &item->rot);
 
 	update_item_transform(item);
 }
