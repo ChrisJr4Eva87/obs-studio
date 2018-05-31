@@ -2472,7 +2472,7 @@ void obs_sceneitem_group_ungroup(obs_sceneitem_t *item)
 	full_lock(subscene);
 	first = subscene->first_item;
 	last = first;
-	for (;;) {
+	while (last) {
 		remove_group_transform(last);
 		last->parent = scene;
 		if (!last->next)
@@ -2485,18 +2485,22 @@ void obs_sceneitem_group_ungroup(obs_sceneitem_t *item)
 	/* ------------------------- */
 
 	full_lock(scene);
-	if (item->prev) {
-		first->prev = item->prev;
-		item->next = first;
+	if (last) {
+		if (item->prev) {
+			first->prev = item->prev;
+			item->prev->next = first;
+		} else {
+			scene->first_item = first;
+			first->prev = NULL;
+		}
+		last->next = item->next;
+		if (last->next)
+			last->next->prev = last;
+		item->next = item->prev = NULL;
+		item->parent = NULL;
 	} else {
-		scene->first_item = first;
-		first->prev = NULL;
+		detach_sceneitem(item);
 	}
-	last->next = item->next;
-	if (last->next)
-		last->next->prev = last;
-	item->next = item->prev = NULL;
-	item->parent = NULL;
 	full_unlock(scene);
 
 	/* ------------------------- */
