@@ -899,7 +899,7 @@ void SourceTree::dropEvent(QDropEvent *event)
 	/* store destination group if moving to a  */
 	/* group                                   */
 
-	obs_sceneitem_t *dropItem = items[row];
+	obs_sceneitem_t *dropItem = items[row]; /* item being dropped on */
 	bool itemIsGroup = obs_sceneitem_is_group(dropItem);
 
 	obs_sceneitem_t *dropGroup = itemIsGroup
@@ -933,17 +933,6 @@ void SourceTree::dropEvent(QDropEvent *event)
 	}
 
 	/* --------------------------------------- */
-	/* if dropping a group, detect if it's     */
-	/* below another group                     */
-
-	obs_sceneitem_t *itemBelow = row == stm->items.count()
-		? nullptr
-		: stm->items[row];
-	if (!itemBelow || obs_sceneitem_get_group(itemBelow) != dropGroup) {
-		dropGroup = nullptr;
-	}
-
-	/* --------------------------------------- */
 	/* determine if any base group is selected */
 
 	bool hasGroups = false;
@@ -952,6 +941,22 @@ void SourceTree::dropEvent(QDropEvent *event)
 		if (obs_sceneitem_is_group(item)) {
 			hasGroups = true;
 			break;
+		}
+	}
+
+	/* --------------------------------------- */
+	/* if dropping a group, detect if it's     */
+	/* below another group                     */
+
+	obs_sceneitem_t *itemBelow = row == stm->items.count()
+		? nullptr
+		: stm->items[row];
+	if (hasGroups) {
+		if (!itemBelow ||
+		    obs_sceneitem_get_group(itemBelow) != dropGroup) {
+			indicator = QAbstractItemView::BelowItem;
+			dropGroup = nullptr;
+			dropOnCollapsed = false;
 		}
 	}
 
